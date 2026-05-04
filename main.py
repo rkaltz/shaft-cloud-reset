@@ -385,12 +385,20 @@ def home() -> str:
   <title>Golf Shaft Design Studio</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #f3f6f4; color: #17211f; }
-    header { background: #0e3b36; color: white; padding: 22px 26px; }
-    h1 { margin: 0; font-size: 28px; }
-    header p { margin: 8px 0 0; color: #d6e8e4; }
-    main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px; }
-    section { background: white; border: 1px solid #dbe4e1; border-radius: 8px; padding: 16px; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #dfe6e3; color: #17211f; }
+    header { background: #17211f; color: white; padding: 14px 18px; border-bottom: 4px solid #17695f; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+    header p { margin: 6px 0 0; color: #c8d8d4; }
+    main { display: grid; grid-template-columns: 340px 1fr; gap: 0; min-height: calc(100vh - 78px); }
+    section { background: #f8fbfa; border-right: 1px solid #b9c8c4; padding: 16px; }
+    section.workspace { background: #eef2f0; border-right: 0; padding: 0; }
+    .workspace-head { display: flex; justify-content: space-between; align-items: center; background: #ffffff; border-bottom: 1px solid #cdd9d6; padding: 12px 14px; }
+    .workspace-title { font-size: 18px; font-weight: 700; }
+    .tabs { display: flex; gap: 6px; }
+    .tab { width: auto; margin: 0; padding: 8px 12px; background: #d7e2df; color: #17211f; border: 1px solid #b9c8c4; border-radius: 6px; }
+    .tab.active { background: #17695f; color: white; }
+    .view { padding: 16px; }
+    .hidden { display: none; }
     label { display: block; margin-top: 12px; font-size: 13px; font-weight: 700; }
     input, select, button { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 5px; border: 1px solid #b9c8c4; border-radius: 6px; font-size: 15px; }
     button { border: 0; background: #17695f; color: white; font-weight: 700; cursor: pointer; margin-top: 16px; }
@@ -406,7 +414,11 @@ def home() -> str:
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { border-bottom: 1px solid #e3ebe8; padding: 8px; text-align: left; }
     th { color: #50615e; font-size: 13px; }
-    canvas { width: 100%; height: 230px; border: 1px solid #e2ebe8; border-radius: 8px; margin-top: 10px; }
+    canvas { width: 100%; height: 230px; border: 1px solid #cbd8d5; border-radius: 6px; margin-top: 10px; background: white; }
+    .drawing-canvas { height: 420px; background: #101918; border-color: #344642; }
+    .cad-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+    .cad-chip { background: #17211f; color: #d7fff6; padding: 10px; border-radius: 6px; font-size: 13px; }
+    .cad-chip strong { display: block; color: white; font-size: 18px; margin-top: 4px; }
     pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; max-height: 300px; overflow: auto; }
     @media (max-width: 900px) { main, .grid2 { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } }
   </style>
@@ -476,35 +488,76 @@ def home() -> str:
       <button class="secondary" onclick="downloadGcode(this)">Export G-Code</button>
       <p><a href="/docs">Developer API tester</a></p>
     </section>
-    <section>
-      <h2>Results</h2>
-      <div class="metrics">
-        <div class="card"><span>Overall CPM</span><strong id="cpm">-</strong></div>
-        <div class="card"><span>CPM Error</span><strong id="error">-</strong></div>
-        <div class="card"><span>Mass</span><strong id="mass">-</strong></div>
-        <div class="card"><span>Torsion</span><strong id="torsion">-</strong></div>
-      </div>
-      <div class="grid2">
-        <div>
-          <h3>7-Zone CPM Profile</h3>
-          <canvas id="cpmChart" width="640" height="260"></canvas>
-          <table><thead><tr><th>Station</th><th>CPM</th></tr></thead><tbody id="zones"></tbody></table>
-        </div>
-        <div>
-          <h3>Trackman-Style Launch Estimate</h3>
-          <table><tbody id="launch"></tbody></table>
-          <h3>Engineering Analytics</h3>
-          <table><tbody id="analytics"></tbody></table>
+    <section class="workspace">
+      <div class="workspace-head">
+        <div class="workspace-title">Engineering Workspace</div>
+        <div class="tabs">
+          <button class="tab active" id="simTab" onclick="showView('simulation')">Simulation</button>
+          <button class="tab" id="drawTab" onclick="showView('drawing')">Design / Drawing</button>
         </div>
       </div>
-      <h3>Experimental / Manufacturing Library</h3>
-      <pre id="library"></pre>
-      <h3>Mandrel / Taper G-Code</h3>
-      <pre id="gcode"></pre>
+      <div id="simulationView" class="view">
+        <div class="metrics">
+          <div class="card"><span>Overall CPM</span><strong id="cpm">-</strong></div>
+          <div class="card"><span>CPM Error</span><strong id="error">-</strong></div>
+          <div class="card"><span>Mass</span><strong id="mass">-</strong></div>
+          <div class="card"><span>Torsion</span><strong id="torsion">-</strong></div>
+        </div>
+        <div class="grid2">
+          <div>
+            <h3>7-Zone CPM Profile</h3>
+            <canvas id="cpmChart" width="640" height="260"></canvas>
+            <table><thead><tr><th>Station</th><th>CPM</th></tr></thead><tbody id="zones"></tbody></table>
+          </div>
+          <div>
+            <h3>Trackman-Style Launch Estimate</h3>
+            <table><tbody id="launch"></tbody></table>
+            <h3>Engineering Analytics</h3>
+            <table><tbody id="analytics"></tbody></table>
+          </div>
+        </div>
+        <h3>Experimental / Manufacturing Library</h3>
+        <pre id="library"></pre>
+        <h3>Mandrel / Taper G-Code</h3>
+        <pre id="gcode"></pre>
+      </div>
+      <div id="drawingView" class="view hidden">
+        <div class="cad-strip">
+          <div class="cad-chip">Length<strong id="drawLength">-</strong></div>
+          <div class="cad-chip">Butt OD<strong id="drawButt">-</strong></div>
+          <div class="cad-chip">Tip OD<strong id="drawTip">-</strong></div>
+          <div class="cad-chip">Selected Tool<strong id="drawTool">-</strong></div>
+        </div>
+        <h3>Composite Shaft Drawing</h3>
+        <canvas class="drawing-canvas" id="designCanvas" width="1100" height="420"></canvas>
+        <div class="grid2">
+          <div>
+            <h3>Drawing Dimensions</h3>
+            <table><thead><tr><th>Feature</th><th>Value</th></tr></thead><tbody id="drawingDims"></tbody></table>
+          </div>
+          <div>
+            <h3>Segment Schedule</h3>
+            <table><thead><tr><th>Section</th><th>OD</th><th>EI</th></tr></thead><tbody id="segmentSchedule"></tbody></table>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
   <script>
     let latest = null;
+
+    function showView(viewName) {
+      const simulation = document.getElementById('simulationView');
+      const drawing = document.getElementById('drawingView');
+      const simTab = document.getElementById('simTab');
+      const drawTab = document.getElementById('drawTab');
+      const showDrawing = viewName === 'drawing';
+      simulation.classList.toggle('hidden', showDrawing);
+      drawing.classList.toggle('hidden', !showDrawing);
+      simTab.classList.toggle('active', !showDrawing);
+      drawTab.classList.toggle('active', showDrawing);
+      if (showDrawing && latest) drawDesign(latest);
+    }
 
     function flashButton(button, label) {
       if (!button) return;
@@ -572,6 +625,7 @@ def home() -> str:
       document.getElementById('gcode').textContent = latest.gcode;
 
       drawChart(latest.zone_profile);
+      drawDesign(latest);
     }
 
     function drawChart(profile) {
@@ -603,6 +657,91 @@ def home() -> str:
         ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
         ctx.fillText(p.station_in + '"', x - 10, canvas.height - 10);
       });
+    }
+
+    function drawDesign(data) {
+      const canvas = document.getElementById('designCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const ei = data.ei_profile;
+      const lengthMm = 1016;
+      const left = 76;
+      const right = canvas.width - 72;
+      const centerY = 205;
+      const scaleX = (right - left) / lengthMm;
+      const maxOd = Math.max(...ei.map(s => s.outer_diameter_mm));
+      const radiusScale = 7.0;
+
+      ctx.fillStyle = '#101918';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#243532';
+      ctx.lineWidth = 1;
+      for (let x = left; x <= right; x += 63.5 * scaleX) {
+        ctx.beginPath(); ctx.moveTo(x, 42); ctx.lineTo(x, 350); ctx.stroke();
+      }
+      for (let y = 65; y <= 345; y += 40) {
+        ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+      }
+
+      const stations = [0, 254, 508, 762, 1016];
+      const ods = [15, 13, 11, 9, 7];
+      ctx.beginPath();
+      stations.forEach((z, i) => {
+        const x = left + z * scaleX;
+        const y = centerY - ods[i] * radiusScale;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      for (let i = stations.length - 1; i >= 0; i--) {
+        const x = left + stations[i] * scaleX;
+        const y = centerY + ods[i] * radiusScale;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#d7fff6';
+      ctx.globalAlpha = 0.88;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#35c7b2';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.strokeStyle = '#f2b84b';
+      ctx.fillStyle = '#f2b84b';
+      ctx.lineWidth = 1.5;
+      const ZONES = [41, 36, 31, 26, 21, 16, 11];
+      ZONES.forEach(station => {
+        const x = left + (41 - station) * 25.4 * scaleX;
+        ctx.beginPath(); ctx.moveTo(x, 70); ctx.lineTo(x, 340); ctx.stroke();
+        ctx.fillText(station + '" CPM', x - 18, 58);
+      });
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '16px Arial';
+      ctx.fillText('Side Profile / Mandrel Envelope', left, 28);
+      ctx.font = '13px Arial';
+      ctx.fillText('Butt', left - 8, centerY + maxOd * radiusScale + 32);
+      ctx.fillText('Tip', right - 10, centerY + maxOd * radiusScale + 32);
+      ctx.fillText('Total Length: 1016 mm / 40 in', left, 382);
+      ctx.fillText('OD Taper: 15 mm butt to 7 mm tip', left + 260, 382);
+      ctx.fillText('CPM profiling stations shown in gold', left + 540, 382);
+
+      document.getElementById('drawLength').textContent = '1016 mm';
+      document.getElementById('drawButt').textContent = '15.0 mm';
+      document.getElementById('drawTip').textContent = '7.0 mm';
+      document.getElementById('drawTool').textContent = 'T' + data.gcode_settings.tool_number;
+      document.getElementById('drawingDims').innerHTML = [
+        ['Overall Length', '1016 mm / 40 in'],
+        ['Butt OD', '15.0 mm'],
+        ['Tip OD', '7.0 mm'],
+        ['Clamp Reference', '5 in'],
+        ['Profile Stations', '41, 36, 31, 26, 21, 16, 11 in'],
+        ['G-Code Units', data.gcode_settings.units],
+        ['Pass Count', data.gcode_settings.pass_count]
+      ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+      document.getElementById('segmentSchedule').innerHTML = data.ei_profile.map(
+        row => `<tr><td>${row.segment}</td><td>${row.outer_diameter_mm.toFixed(1)} mm</td><td>${row.ei_nm2.toExponential(2)}</td></tr>`
+      ).join('');
     }
 
     function downloadJson(button) {
