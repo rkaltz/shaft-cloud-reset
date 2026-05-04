@@ -751,6 +751,14 @@ def home() -> str:
     let sketchTool = 'select';
     let latestFitProfile = null;
 
+    window.onerror = function(message, source, line, column) {
+      const consolePanel = document.getElementById('cadConsole');
+      if (consolePanel) {
+        consolePanel.textContent += `\n[APP ERROR] ${message} at ${line}:${column}`;
+      }
+      return false;
+    };
+
     function defaultFlags() {
       return [
         {name: 'Butt 0deg', length: 420, root: 92, tip: 74, angle: 0, station: 'Butt', layer: 'axial', locked: false},
@@ -805,24 +813,30 @@ def home() -> str:
     }
 
     async function run(button) {
-      flashButton(button, 'Analyzing...');
-      const params = new URLSearchParams({
-        target_cpm: document.getElementById('target').value,
-        head_weight_g: document.getElementById('head').value,
-        material_name: document.getElementById('material').value,
-        method_key: document.getElementById('method').value,
-        wrap_angle_deg: document.getElementById('angle').value,
-        head_speed_mph: document.getElementById('speed').value,
-        gcode_units: document.getElementById('gcodeUnits').value,
-        gcode_rapid_feed: document.getElementById('rapidFeed').value,
-        gcode_cut_feed: document.getElementById('cutFeed').value,
-        gcode_spin_feed: document.getElementById('spinFeed').value,
-        gcode_spindle_rpm: document.getElementById('spindleRpm').value,
-        gcode_tool_number: document.getElementById('toolNumber').value,
-        gcode_pass_count: document.getElementById('passCount').value
-      });
-      const res = await fetch('/api/analyze?' + params.toString());
-      latest = await res.json();
+      try {
+        flashButton(button, 'Analyzing...');
+        const params = new URLSearchParams({
+          target_cpm: document.getElementById('target').value,
+          head_weight_g: document.getElementById('head').value,
+          material_name: document.getElementById('material').value,
+          method_key: document.getElementById('method').value,
+          wrap_angle_deg: document.getElementById('angle').value,
+          head_speed_mph: document.getElementById('speed').value,
+          gcode_units: document.getElementById('gcodeUnits').value,
+          gcode_rapid_feed: document.getElementById('rapidFeed').value,
+          gcode_cut_feed: document.getElementById('cutFeed').value,
+          gcode_spin_feed: document.getElementById('spinFeed').value,
+          gcode_spindle_rpm: document.getElementById('spindleRpm').value,
+          gcode_tool_number: document.getElementById('toolNumber').value,
+          gcode_pass_count: document.getElementById('passCount').value
+        });
+        const res = await fetch('/api/analyze?' + params.toString());
+        if (!res.ok) throw new Error(`Analyze API failed: ${res.status}`);
+        latest = await res.json();
+      } catch (error) {
+        writeCadConsole(error.message || String(error));
+        return;
+      }
 
       document.getElementById('cpm').textContent = latest.overall_cpm.toFixed(1);
       document.getElementById('error').textContent = latest.cpm_error.toFixed(1);
@@ -1765,7 +1779,17 @@ method = "${document.getElementById('method').value}"`
       URL.revokeObjectURL(url);
     }
 
-    run();
+    window.showView = showView;
+    window.run = run;
+    window.runFitToBuild = runFitToBuild;
+    window.applyFitToCad = applyFitToCad;
+    window.downloadFitProfile = downloadFitProfile;
+    window.renderFlagEditor = renderFlagEditor;
+    window.downloadCadScript = downloadCadScript;
+    window.downloadJson = downloadJson;
+    window.downloadGcode = downloadGcode;
+
+    run().catch(error => writeCadConsole(error.message || String(error)));
   </script>
 </body>
 </html>
