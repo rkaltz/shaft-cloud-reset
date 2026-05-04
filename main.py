@@ -418,13 +418,18 @@ def home() -> str:
     .drawing-canvas { height: 420px; background: #101918; border-color: #344642; }
     .flag-canvas { height: 520px; background: #101918; border-color: #344642; cursor: crosshair; }
     .viewer-canvas { height: 520px; background: #f7f8fb; border-color: #cbd8d5; }
-    .cad-split { display: grid; grid-template-columns: 240px 1fr 360px; gap: 12px; }
+    .cad-split { display: grid; grid-template-columns: 280px 1fr 280px; grid-template-rows: 520px 150px; gap: 8px; }
     .viewer-panel { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; }
     .viewer-panel h3 { margin: 6px 0 8px; border-bottom: 1px solid #17211f; padding-bottom: 4px; }
     .viewer-panel label { display: flex; justify-content: space-between; align-items: center; margin: 7px 0; font-weight: 400; }
     .viewer-panel input { width: auto; }
     .link-list button { display: block; width: 100%; text-align: left; background: transparent; color: #005bd1; padding: 3px 0; margin: 0; font-weight: 400; }
     .code-panel textarea { width: 100%; height: 520px; box-sizing: border-box; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; font-family: Consolas, monospace; font-size: 13px; line-height: 1.45; color: #8a005f; background: #fff; }
+    .viewport-panel { min-width: 0; }
+    .inspector-panel { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 10px; overflow: auto; }
+    .inspector-panel h3 { margin: 6px 0 8px; border-bottom: 1px solid #dbe4e1; padding-bottom: 5px; }
+    .inspector-panel table { font-size: 12px; }
+    .console-panel { grid-column: 1 / 4; background: #151b1a; color: #d7fff6; border-radius: 6px; padding: 10px; overflow: auto; font-family: Consolas, monospace; font-size: 13px; }
     .export-row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-top: 8px; }
     .cad-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
     .cad-chip { background: #17211f; color: #d7fff6; padding: 10px; border-radius: 6px; font-size: 13px; }
@@ -448,6 +453,7 @@ def home() -> str:
     .sketch-options { display: flex; gap: 14px; align-items: center; margin: 10px 0; font-size: 13px; }
     .sketch-options label { display: flex; gap: 6px; align-items: center; margin: 0; font-weight: 700; }
     .sketch-options input { width: auto; margin: 0; }
+    .layer-tag { display: inline-block; padding: 2px 7px; border-radius: 999px; color: #101918; font-weight: 700; font-size: 12px; }
     .editable-table input { margin: 0; padding: 6px; font-size: 13px; }
     .editable-table button { margin: 0; padding: 6px; }
     pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; max-height: 300px; overflow: auto; }
@@ -613,6 +619,7 @@ def home() -> str:
         <div class="sketch-options">
           <label><input id="snapGrid" type="checkbox" checked onchange="drawFlags()"> Snap to 5 mm grid</label>
           <label><input id="lockAngle" type="checkbox"> Lock fiber angle while dragging</label>
+          <label><input id="lockDimensions" type="checkbox" onchange="drawFlags()"> Lock dimensions</label>
           <span id="selectedFlagLabel">No flag selected</span>
         </div>
         <div class="tool-row">
@@ -621,6 +628,12 @@ def home() -> str:
           <button class="secondary" onclick="resetFlags(this)">Reset Flags</button>
           <button class="secondary" onclick="downloadFlagJson(this)">Export Flag JSON</button>
           <button class="secondary" onclick="downloadFlagSvg(this)">Export Flag SVG</button>
+          <button class="secondary" onclick="downloadFlagDxf(this)">Export DXF</button>
+        </div>
+        <div class="tool-row">
+          <button class="secondary" onclick="downloadProject(this)">Save Project</button>
+          <button class="secondary" onclick="document.getElementById('projectFile').click()">Load Project</button>
+          <input id="projectFile" type="file" accept="application/json,.json" style="display:none" onchange="loadProjectFile(event)">
         </div>
         <h3>Editable Flag Dimensions</h3>
         <table class="editable-table">
@@ -632,6 +645,7 @@ def home() -> str:
               <th>Tip width mm</th>
               <th>Fiber angle</th>
               <th>Station</th>
+              <th>Layer</th>
               <th></th>
             </tr>
           </thead>
@@ -647,7 +661,22 @@ def home() -> str:
         </div>
         <h3>Parametric 3D Shaft / Mandrel Preview</h3>
         <div class="cad-split">
-          <div class="viewer-panel">
+          <div class="code-panel">
+            <textarea id="cadScript" spellcheck="false"></textarea>
+          </div>
+          <div class="viewport-panel">
+            <canvas class="viewer-canvas" id="cad3dCanvas" width="900" height="520"></canvas>
+            <div class="export-row">
+              <select id="cadExportType">
+                <option>JSCAD script</option>
+                <option>STEP recipe</option>
+                <option>STL recipe</option>
+                <option>Mandrel G-code</option>
+              </select>
+              <button onclick="downloadCadScript(this)">Export</button>
+            </div>
+          </div>
+          <div class="inspector-panel">
             <h3>Options</h3>
             <label>Dark Mode <input id="cadDarkMode" type="checkbox" onchange="drawCad3d()"></label>
             <label>Show Axis <input id="cadShowAxis" type="checkbox" checked onchange="drawCad3d()"></label>
@@ -667,20 +696,10 @@ def home() -> str:
               <button onclick="loadCadExample('hollow')">Hollow Operations</button>
               <button onclick="loadCadExample('parametric')">Parameter Types</button>
             </div>
+            <h3>Object Inspector</h3>
+            <table><tbody id="cadInspector"></tbody></table>
           </div>
-          <div>
-            <canvas class="viewer-canvas" id="cad3dCanvas" width="900" height="520"></canvas>
-            <div class="export-row">
-              <select id="cadExportType">
-                <option>JSCAD script</option>
-                <option>STEP recipe</option>
-              </select>
-              <button onclick="downloadCadScript(this)">Export</button>
-            </div>
-          </div>
-          <div class="code-panel">
-            <textarea id="cadScript" spellcheck="false"></textarea>
-          </div>
+          <div class="console-panel" id="cadConsole">CAD console ready.</div>
         </div>
       </div>
     </section>
@@ -695,10 +714,10 @@ def home() -> str:
 
     function defaultFlags() {
       return [
-        {name: 'Butt 0deg', length: 420, root: 92, tip: 74, angle: 0, station: 'Butt'},
-        {name: 'Bias +45', length: 360, root: 78, tip: 58, angle: 45, station: 'Mid'},
-        {name: 'Bias -45', length: 360, root: 78, tip: 58, angle: -45, station: 'Mid'},
-        {name: 'Tip 0deg', length: 300, root: 55, tip: 36, angle: 0, station: 'Tip'}
+        {name: 'Butt 0deg', length: 420, root: 92, tip: 74, angle: 0, station: 'Butt', layer: 'axial', locked: false},
+        {name: 'Bias +45', length: 360, root: 78, tip: 58, angle: 45, station: 'Mid', layer: 'bias', locked: false},
+        {name: 'Bias -45', length: 360, root: 78, tip: 58, angle: -45, station: 'Mid', layer: 'bias', locked: false},
+        {name: 'Tip 0deg', length: 300, root: 55, tip: 36, angle: 0, station: 'Tip', layer: 'tip', locked: false}
       ];
     }
 
@@ -927,6 +946,7 @@ def home() -> str:
           <td><input id="flagTip${index}" type="number" value="${flag.tip}" step="1" onchange="updateFlag(${index}, 'tip', this.value)"></td>
           <td><input id="flagAngle${index}" type="number" value="${flag.angle}" step="1" onchange="updateFlag(${index}, 'angle', this.value)"></td>
           <td><input id="flagStation${index}" value="${flag.station}" onchange="updateFlag(${index}, 'station', this.value)"></td>
+          <td><input id="flagLayer${index}" value="${flag.layer || 'ply'}" onchange="updateFlag(${index}, 'layer', this.value)"></td>
           <td><button class="secondary" onclick="deleteFlag(${index}, this)">Delete</button></td>
         </tr>
       `).join('');
@@ -957,13 +977,13 @@ def home() -> str:
 
     function addFlag(button) {
       flashButton(button, 'Added');
-      flags.push({name: 'New flag', length: 320, root: 70, tip: 48, angle: 0, station: 'Custom'});
+      flags.push({name: 'New flag', length: 320, root: 70, tip: 48, angle: 0, station: 'Custom', layer: 'custom', locked: false});
       renderFlagEditor();
     }
 
     function addTriangleFlag(button) {
       flashButton(button, 'Added');
-      flags.push({name: 'Triangle bias flag', length: 340, root: 76, tip: 4, angle: 45, station: 'Custom'});
+      flags.push({name: 'Triangle bias flag', length: 340, root: 76, tip: 4, angle: 45, station: 'Custom', layer: 'bias', locked: false});
       renderFlagEditor();
     }
 
@@ -1037,6 +1057,7 @@ def home() -> str:
       const geometry = flagGeometry[activeDrag.flagIndex];
       if (!geometry) return;
       const flag = flags[activeDrag.flagIndex];
+      if (document.getElementById('lockDimensions').checked || flag.locked) return;
       const localX = Math.max(40, point.x - geometry.x);
       const localY = Math.abs(point.y - geometry.y);
       if (activeDrag.cornerIndex === 1 || activeDrag.cornerIndex === 2) {
@@ -1072,6 +1093,17 @@ def home() -> str:
       ctx.fillStyle = '#b24ac7';
       ctx.font = '700 15px Arial';
       ctx.fillText(text, x, y);
+    }
+
+    function layerColor(layer) {
+      const colors = {
+        axial: '#d7fff6',
+        bias: '#b8e9ff',
+        tip: '#ffd6a5',
+        hoop: '#caffbf',
+        custom: '#e0c3fc'
+      };
+      return colors[(layer || '').toLowerCase()] || '#d7fff6';
     }
 
     function drawHandle(ctx, x, y, active, selected) {
@@ -1136,7 +1168,7 @@ def home() -> str:
           if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
         });
         ctx.closePath();
-        ctx.fillStyle = index % 2 === 0 ? '#d7fff6' : '#b8e9ff';
+        ctx.fillStyle = layerColor(flag.layer);
         ctx.globalAlpha = 0.14;
         ctx.fill();
         ctx.globalAlpha = 1;
@@ -1168,6 +1200,10 @@ def home() -> str:
 
         ctx.fillStyle = '#ffffff';
         ctx.fillText(`${flag.name} | ${flag.station} | ${flag.angle} deg`, x, y - flag.root * scale / 2 - 16);
+        ctx.fillStyle = layerColor(flag.layer);
+        ctx.fillRect(x + flag.length * scale + 14, y - 30, 58, 18);
+        ctx.fillStyle = '#101918';
+        ctx.fillText(flag.layer || 'ply', x + flag.length * scale + 19, y - 16);
         drawDimension(ctx, x, y + flag.root * scale / 2 + 18, x + flag.length * scale, y + flag.root * scale / 2 + 18, `${flag.length} mm`);
         drawConstraintLabel(ctx, 'H', x + flag.length * scale / 2, y - 8);
         drawConstraintLabel(ctx, 'V', x - 22, y + 5);
@@ -1233,6 +1269,110 @@ def home() -> str:
       URL.revokeObjectURL(url);
     }
 
+    function dxfLine(x1, y1, x2, y2, layer) {
+      return `0
+LINE
+8
+${layer}
+10
+${x1.toFixed(3)}
+20
+${y1.toFixed(3)}
+30
+0.000
+11
+${x2.toFixed(3)}
+21
+${y2.toFixed(3)}
+31
+0.000`;
+    }
+
+    function flagDxfText() {
+      const lines = ['0', 'SECTION', '2', 'ENTITIES'];
+      flags.forEach((flag, index) => {
+        const x = 20;
+        const y = 20 + index * 140;
+        const pts = [
+          [x, y - flag.root / 2],
+          [x + flag.length, y - flag.tip / 2],
+          [x + flag.length, y + flag.tip / 2],
+          [x, y + flag.root / 2]
+        ];
+        const layer = (flag.layer || 'PLY').toUpperCase();
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i];
+          const b = pts[(i + 1) % pts.length];
+          lines.push(dxfLine(a[0], a[1], b[0], b[1], layer));
+        }
+      });
+      lines.push('0', 'ENDSEC', '0', 'EOF');
+      return lines.join('\n');
+    }
+
+    function downloadFlagDxf(button) {
+      flashButton(button, 'Exported');
+      const blob = new Blob([flagDxfText()], {type: 'application/dxf'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-flag-layout.dxf';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function currentProject() {
+      return {
+        version: 1,
+        name: 'ShaftCAD project',
+        inputs: {
+          target_cpm: document.getElementById('target').value,
+          head_weight_g: document.getElementById('head').value,
+          club_speed_mph: document.getElementById('speed').value,
+          wrap_angle_deg: document.getElementById('angle').value,
+          material: document.getElementById('material').value,
+          manufacturing_method: document.getElementById('method').value
+        },
+        gcode: latest ? latest.gcode_settings : {},
+        flags
+      };
+    }
+
+    function downloadProject(button) {
+      flashButton(button, 'Saved');
+      const blob = new Blob([JSON.stringify(currentProject(), null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaftcad-project.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function loadProjectFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const project = JSON.parse(reader.result);
+        if (project.inputs) {
+          document.getElementById('target').value = project.inputs.target_cpm || 255;
+          document.getElementById('head').value = project.inputs.head_weight_g || 205;
+          document.getElementById('speed').value = project.inputs.club_speed_mph || 105;
+          document.getElementById('angle').value = project.inputs.wrap_angle_deg || 45;
+          document.getElementById('material').value = project.inputs.material || 'Mitsubishi MR70';
+          document.getElementById('method').value = project.inputs.manufacturing_method || 'roll_wrapped';
+        }
+        if (Array.isArray(project.flags)) {
+          flags = project.flags;
+          renderFlagEditor();
+        }
+        run();
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    }
+
     function shaftCadScript() {
       const angle = document.getElementById('angle').value;
       const units = latest ? latest.gcode_settings.units : 'mm';
@@ -1293,6 +1433,37 @@ material = "${document.getElementById('material').value}"
 method = "${document.getElementById('method').value}"`
       };
       document.getElementById('cadScript').value = examples[kind] || shaftCadScript();
+      writeCadConsole(`Loaded CAD example: ${kind}`);
+    }
+
+    function writeCadConsole(message) {
+      const consolePanel = document.getElementById('cadConsole');
+      if (!consolePanel) return;
+      const stamp = new Date().toLocaleTimeString();
+      consolePanel.textContent += `\n[${stamp}] ${message}`;
+      consolePanel.scrollTop = consolePanel.scrollHeight;
+    }
+
+    function updateCadInspector() {
+      const inspector = document.getElementById('cadInspector');
+      if (!inspector) return;
+      const material = document.getElementById('material').value;
+      const method = document.getElementById('method').value;
+      const angle = document.getElementById('angle').value;
+      const cpm = latest ? latest.overall_cpm.toFixed(1) : '-';
+      const rows = [
+        ['Model', 'Golf shaft envelope'],
+        ['Material', material],
+        ['Method', method],
+        ['Wrap angle', `${angle} deg`],
+        ['Overall CPM', cpm],
+        ['Segments', '4'],
+        ['Total length', '1016 mm'],
+        ['Butt OD', '15 mm'],
+        ['Tip OD', '7 mm'],
+        ['Flags', flags.length]
+      ];
+      inspector.innerHTML = rows.map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
     }
 
     function drawCad3d() {
@@ -1395,15 +1566,30 @@ method = "${document.getElementById('method').value}"`
 
       const script = document.getElementById('cadScript');
       if (script) script.value = shaftCadScript();
+      updateCadInspector();
     }
 
     function downloadCadScript(button) {
       flashButton(button, 'Exported');
-      const blob = new Blob([shaftCadScript()], {type: 'text/plain'});
+      const exportType = document.getElementById('cadExportType').value;
+      let content = shaftCadScript();
+      let filename = 'shaft-parametric-model.jscad';
+      if (exportType === 'STEP recipe') {
+        content = '# CadQuery STEP recipe\n# Generate tapered shaft/mandrel sections with lofted cone segments.\n# Export target: shaft_mandrel.step\n\n' + shaftCadScript();
+        filename = 'shaft-step-recipe.py';
+      } else if (exportType === 'STL recipe') {
+        content = '# STL preview recipe\n# Lower fidelity visual check export for shaft envelope.\n\n' + shaftCadScript();
+        filename = 'shaft-stl-recipe.py';
+      } else if (exportType === 'Mandrel G-code') {
+        content = latest ? latest.gcode : document.getElementById('gcode').textContent;
+        filename = 'shaft-mandrel-toolpath.nc';
+      }
+      writeCadConsole(`Exported ${exportType}: ${filename}`);
+      const blob = new Blob([content], {type: 'text/plain'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'shaft-parametric-model.jscad';
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
     }
