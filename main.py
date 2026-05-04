@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from math import pi, sqrt
+from dataclasses import asdict, dataclass
+from math import cos, degrees, log10, pi, radians, sin, sqrt
 from typing import Any
 
 from fastapi import FastAPI
@@ -9,51 +10,369 @@ from fastapi.responses import HTMLResponse
 app = FastAPI(title="Golf Shaft Design Studio", version="1.0")
 
 
-def analyze_shaft(target_cpm: float = 255.0, head_weight_g: float = 205.0) -> dict[str, Any]:
-    material = {
-        "name": "Mitsubishi MR70",
-        "e1_pa": 161e9,
-        "e2_pa": 8.7e9,
-        "g12_pa": 4.5e9,
-        "density_kg_m3": 1600.0,
-    }
-    elements = [
-        {"length_m": 0.254, "od_m": 0.015, "id_m": 0.013},
-        {"length_m": 0.254, "od_m": 0.013, "id_m": 0.011},
-        {"length_m": 0.254, "od_m": 0.011, "id_m": 0.009},
-        {"length_m": 0.254, "od_m": 0.009, "id_m": 0.007},
+@dataclass
+class Material:
+    name: str
+    e1_pa: float
+    e2_pa: float
+    g12_pa: float
+    nu12: float
+    density_kg_m3: float
+    cost_per_kg: float
+
+
+@dataclass
+class Ply:
+    angle_deg: float
+    thickness_m: float
+
+
+@dataclass
+class Segment:
+    name: str
+    length_m: float
+    outer_diameter_m: float
+    inner_diameter_m: float
+    layup: list[Ply]
+
+
+MATERIALS: dict[str, Material] = {
+    "Mitsubishi MR70": Material("Mitsubishi MR70", 161e9, 8.7e9, 4.5e9, 0.32, 1600.0, 95.0),
+    "Toray T1100G": Material("Toray T1100G", 215e9, 8.5e9, 4.2e9, 0.33, 1580.0, 125.0),
+    "Hexcel IM7": Material("Hexcel IM7", 276e9, 14.0e9, 5.2e9, 0.31, 1620.0, 140.0),
+}
+
+MANUFACTURING_METHODS: dict[str, dict[str, Any]] = {
+    "roll_wrapped": {
+        "name": "Roll-wrapped prepreg",
+        "torsion_factor": 1.0,
+        "mass_factor": 1.0,
+        "cost_factor": 1.0,
+        "note": "Baseline OEM-style flag wrap around mandrel.",
+    },
+    "tubular_braid": {
+        "name": "Seamless tubular braid",
+        "torsion_factor": 1.18,
+        "mass_factor": 1.04,
+        "cost_factor": 1.45,
+        "note": "Continuous braided tube with reduced lap-seam/spine behavior.",
+    },
+    "filament_winding": {
+        "name": "Filament winding",
+        "torsion_factor": 1.15,
+        "mass_factor": 1.02,
+        "cost_factor": 1.55,
+        "note": "Controlled continuous tow path; excellent symmetry and hoop control.",
+    },
+    "hybrid_3d": {
+        "name": "3D multi-axial hybrid weave",
+        "torsion_factor": 1.22,
+        "mass_factor": 1.12,
+        "cost_factor": 1.8,
+        "note": "Z-axis reinforcement for delamination resistance and off-center hit durability.",
+    },
+    "automated_tape": {
+        "name": "Automated tape winding",
+        "torsion_factor": 1.2,
+        "mass_factor": 0.92,
+        "cost_factor": 1.7,
+        "note": "Variable-angle tow/tape placement with local wall-thickness steering.",
+    },
+}
+
+ZONE_STATIONS_IN = [41, 36, 31, 26, 21, 16, 11]
+
+
+def default_segments(base_angle: float = 45.0, thickness_m: float = 0.000125) -> list[Segment]:
+    layup = [
+        Ply(0.0, thickness_m),
+        Ply(base_angle, thickness_m),
+        Ply(-base_angle, thickness_m),
+        Ply(0.0, thickness_m),
     ]
-    length = sum(e["length_m"] for e in elements)
-    avg_ei = sum(
-        material["e1_pa"] * (pi / 64.0) * (e["od_m"] ** 4 - e["id_m"] ** 4) * e["length_m"]
-        for e in elements
-    ) / length
-    mass_kg = sum(
-        pi * (e["od_m"] ** 2 - e["id_m"] ** 2) / 4.0 * e["length_m"] * material["density_kg_m3"]
-        for e in elements
+    return [
+        Segment("Butt", 0.254, 0.0150, 0.0130, layup.copy()),
+        Segment("Upper mid", 0.254, 0.0130, 0.0110, layup.copy()),
+        Segment("Lower mid", 0.254, 0.0110, 0.0090, layup.copy()),
+        Segment("Tip", 0.254, 0.0090, 0.0070, layup.copy()),
+    ]
+
+
+def area_moment_i(od: float, id_: float) -> float:
+    return (pi / 64.0) * (od**4 - id_**4)
+
+
+def polar_moment_j(od: float, id_: float) -> float:
+    return (pi / 32.0) * (od**4 - id_**4)
+
+
+def transformed_modulus(material: Material, angle_deg: float) -> float:
+    angle = radians(angle_deg)
+    c = cos(angle)
+    s = sin(angle)
+    return (
+        material.e1_pa * c**4
+        + material.e2_pa * s**4
+        + (2.0 * material.g12_pa + material.nu12 * material.e1_pa) * s**2 * c**2
     )
-    overall_cpm = 14.7 * sqrt(avg_ei / ((head_weight_g / 1000.0) * length**3))
-    stations = [41, 36, 31, 26, 21, 16, 11]
-    zone_profile = [
+
+
+def effective_modulus(segment: Segment, material: Material) -> float:
+    total = sum(p.thickness_m for p in segment.layup)
+    if total <= 0:
+        return material.e1_pa
+    return sum(transformed_modulus(material, p.angle_deg) * p.thickness_m for p in segment.layup) / total
+
+
+def segment_ei(segment: Segment, material: Material) -> float:
+    return effective_modulus(segment, material) * area_moment_i(
+        segment.outer_diameter_m, segment.inner_diameter_m
+    )
+
+
+def total_length(segments: list[Segment]) -> float:
+    return sum(s.length_m for s in segments)
+
+
+def average_ei(segments: list[Segment], material: Material) -> float:
+    length = total_length(segments)
+    return sum(segment_ei(s, material) * s.length_m for s in segments) / length
+
+
+def shaft_mass_kg(segments: list[Segment], material: Material) -> float:
+    return sum(
+        pi * (s.outer_diameter_m**2 - s.inner_diameter_m**2) / 4.0 * s.length_m * material.density_kg_m3
+        for s in segments
+    )
+
+
+def overall_cpm(segments: list[Segment], material: Material, head_weight_g: float) -> float:
+    length = total_length(segments)
+    ei = average_ei(segments, material)
+    return 14.7 * sqrt(ei / ((head_weight_g / 1000.0) * length**3))
+
+
+def zone_profile(segments: list[Segment], material: Material, profile_weight_g: float = 255.0) -> list[dict[str, float]]:
+    ei = average_ei(segments, material)
+    return [
         {
-            "station_in": station,
-            "cpm": 8.5 * sqrt(avg_ei / (0.255 * (station * 0.0254) ** 3)),
+            "station_in": float(station),
+            "cpm": 8.5 * sqrt(ei / ((profile_weight_g / 1000.0) * (station * 0.0254) ** 3)),
         }
-        for station in stations
+        for station in ZONE_STATIONS_IN
     ]
+
+
+def tip_deflection_mm(segments: list[Segment], material: Material, load_n: float = 100.0) -> float:
+    length = total_length(segments)
+    return load_n * length**3 / (3.0 * average_ei(segments, material)) * 1000.0
+
+
+def torsion_deg(segments: list[Segment], material: Material, torque_nm: float = 15.0, factor: float = 1.0) -> float:
+    length = total_length(segments)
+    avg_j = sum(polar_moment_j(s.outer_diameter_m, s.inner_diameter_m) * s.length_m for s in segments) / length
+    return degrees(torque_nm * length / (avg_j * material.g12_pa * factor))
+
+
+def natural_frequency_hz(segments: list[Segment], material: Material) -> float:
+    length = total_length(segments)
+    ei = average_ei(segments, material)
+    mass_per_length = shaft_mass_kg(segments, material) / length
+    return (1.875**2 / (2.0 * pi * length**2)) * sqrt(ei / mass_per_length)
+
+
+def fatigue_cycles(stress_pa: float = 180e6, fatigue_limit_pa: float = 450e6) -> float:
+    return (fatigue_limit_pa / stress_pa) ** 8.5 * 10000.0
+
+
+def wrapping_angle_sweep(target_cpm: float) -> dict[str, Any]:
+    rows = []
+    best = None
+    for angle in range(15, 66, 5):
+        torsion_index = 1.0 + 0.35 * sin(radians(angle * 2.0))
+        cpm = target_cpm + (angle - 45.0) * 0.16
+        score = torsion_index - abs(cpm - target_cpm) / 25.0
+        row = {"angle_deg": angle, "torsion_index": torsion_index, "estimated_cpm": cpm, "score": score}
+        rows.append(row)
+        if best is None or score > best["score"]:
+            best = row
+    return {"best": best, "sweep": rows}
+
+
+def doe_sweep(base_cpm: float, target_cpm: float) -> list[dict[str, float]]:
+    rows = []
+    for scale in [0.8, 0.9, 1.0, 1.1, 1.2]:
+        cpm = base_cpm * sqrt(scale)
+        rows.append({"thickness_scale": scale, "estimated_cpm": cpm, "target_error": cpm - target_cpm})
+    return rows
+
+
+def simulate_launch(cpm: float, head_speed_mph: float) -> dict[str, float]:
+    stiffness_delta = cpm - 255.0
+    ball_speed = head_speed_mph * 1.45 + stiffness_delta * 0.04
+    launch_angle = 13.5 - stiffness_delta * 0.018
+    spin_rpm = 2650.0 - stiffness_delta * 8.5
+    carry_yards = ball_speed * 1.68 + launch_angle * 2.0 - spin_rpm / 180.0
     return {
-        "target_cpm": target_cpm,
-        "overall_cpm": overall_cpm,
-        "cpm_error": overall_cpm - target_cpm,
-        "mass_g": mass_kg * 1000.0,
-        "tip_deflection_mm_100n": 100.0 * length**3 / (3.0 * avg_ei) * 1000.0,
-        "zone_profile": zone_profile,
-        "experimental_methods": [
-            "Tubular braid",
-            "Filament winding",
-            "3D multi-axial hybrid weave",
-            "Automated tape winding",
+        "club_speed_mph": head_speed_mph,
+        "ball_speed_mph": ball_speed,
+        "launch_angle_deg": launch_angle,
+        "spin_rpm": spin_rpm,
+        "carry_yards": carry_yards,
+    }
+
+
+def generate_mandrel_gcode(
+    segments: list[Segment],
+    units: str = "mm",
+    rapid_feed: float = 600.0,
+    cut_feed: float = 180.0,
+    spin_feed: float = 300.0,
+    spindle_rpm: int = 1200,
+    tool_number: int = 1,
+    pass_count: int = 1,
+) -> str:
+    use_inches = units.lower() in {"inch", "in", "inches"}
+    linear_scale = 39.3700787402 if use_inches else 1000.0
+    radius_scale = 19.6850393701 if use_inches else 500.0
+    unit_code = "G20" if use_inches else "G21"
+    unit_label = "inches" if use_inches else "millimeters"
+    pass_count = max(1, min(int(pass_count), 8))
+    tool_number = max(1, int(tool_number))
+    spindle_rpm = max(0, int(spindle_rpm))
+    rapid_feed = max(1.0, float(rapid_feed))
+    cut_feed = max(1.0, float(cut_feed))
+    spin_feed = max(1.0, float(spin_feed))
+
+    lines = [
+        f"{unit_code} ; units in {unit_label}",
+        "G90 ; absolute positioning",
+        "G17 ; XY plane selection",
+        f"T{tool_number} M06 ; mandrel turning / contour tool",
+        f"S{spindle_rpm} M03 ; spindle on clockwise",
+        f"G0 X0.000 Z0.000 F{rapid_feed:.1f}",
+        "; Golf shaft tapered mandrel envelope",
+    ]
+    z_pos = 0.0
+    for index, segment in enumerate(segments, start=1):
+        start_radius = segment.outer_diameter_m * radius_scale
+        z_next = z_pos + segment.length_m * linear_scale
+        end_radius = segment.outer_diameter_m * radius_scale
+        if index < len(segments):
+            end_radius = segments[index].outer_diameter_m * radius_scale
+        lines.extend([f"; Segment {index}: {segment.name}", f"G0 Z{z_pos:.3f} F{rapid_feed:.1f}"])
+        for pass_index in range(1, pass_count + 1):
+            stock_allowance = (pass_count - pass_index) * (0.08 if not use_inches else 0.003)
+            pass_start_radius = start_radius + stock_allowance
+            pass_end_radius = end_radius + stock_allowance
+            lines.extend(
+                [
+                    f"; Pass {pass_index} of {pass_count}",
+                    f"G1 X{pass_start_radius:.3f} F{spin_feed:.1f}",
+                    f"G1 Z{z_next:.3f} X{pass_end_radius:.3f} F{cut_feed:.1f}",
+                ]
+            )
+        lines.append(f"G2 I-{end_radius:.3f} J0.000 F{spin_feed:.1f} ; verification spin pass")
+        z_pos = z_next
+    lines.extend(
+        [
+            "M05 ; spindle stop",
+            "G0 X0.000",
+            "M30 ; program end",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def analyze_shaft(
+    target_cpm: float = 255.0,
+    head_weight_g: float = 205.0,
+    material_name: str = "Mitsubishi MR70",
+    method_key: str = "roll_wrapped",
+    wrap_angle_deg: float = 45.0,
+    head_speed_mph: float = 105.0,
+    gcode_units: str = "mm",
+    gcode_rapid_feed: float = 600.0,
+    gcode_cut_feed: float = 180.0,
+    gcode_spin_feed: float = 300.0,
+    gcode_spindle_rpm: int = 1200,
+    gcode_tool_number: int = 1,
+    gcode_pass_count: int = 1,
+) -> dict[str, Any]:
+    material = MATERIALS.get(material_name, MATERIALS["Mitsubishi MR70"])
+    method = MANUFACTURING_METHODS.get(method_key, MANUFACTURING_METHODS["roll_wrapped"])
+    segments = default_segments(base_angle=wrap_angle_deg)
+    cpm = overall_cpm(segments, material, head_weight_g)
+    mass = shaft_mass_kg(segments, material) * method["mass_factor"]
+    cost = mass * material.cost_per_kg * method["cost_factor"]
+    torsion = torsion_deg(segments, material, factor=method["torsion_factor"])
+    zones = zone_profile(segments, material)
+    fatigue = fatigue_cycles()
+    return {
+        "inputs": {
+            "target_cpm": target_cpm,
+            "head_weight_g": head_weight_g,
+            "material": material_name,
+            "manufacturing_method": method_key,
+            "wrap_angle_deg": wrap_angle_deg,
+            "head_speed_mph": head_speed_mph,
+        },
+        "gcode_settings": {
+            "units": gcode_units,
+            "rapid_feed": gcode_rapid_feed,
+            "cut_feed": gcode_cut_feed,
+            "spin_feed": gcode_spin_feed,
+            "spindle_rpm": gcode_spindle_rpm,
+            "tool_number": gcode_tool_number,
+            "pass_count": gcode_pass_count,
+        },
+        "overall_cpm": cpm,
+        "cpm_error": cpm - target_cpm,
+        "mass_g": mass * 1000.0,
+        "material_cost_usd": cost,
+        "tip_deflection_mm_100n": tip_deflection_mm(segments, material),
+        "torsion_deflection_deg_15nm": torsion,
+        "natural_frequency_hz": natural_frequency_hz(segments, material),
+        "fatigue_cycles_estimate": fatigue,
+        "damage_index": min(0.99, 1.0 / max(log10(fatigue), 1.0)),
+        "zone_profile": zones,
+        "ei_profile": [
+            {
+                "segment": s.name,
+                "ei_nm2": segment_ei(s, material),
+                "effective_modulus_gpa": effective_modulus(s, material) / 1e9,
+                "outer_diameter_mm": s.outer_diameter_m * 1000.0,
+            }
+            for s in segments
         ],
+        "taper_ratios": [
+            {
+                "from": segments[i].name,
+                "to": segments[i + 1].name,
+                "outer_diameter_ratio": segments[i + 1].outer_diameter_m / segments[i].outer_diameter_m,
+            }
+            for i in range(len(segments) - 1)
+        ],
+        "modal": {
+            "first_natural_frequency_hz": natural_frequency_hz(segments, material),
+            "resonance_margin_hz": natural_frequency_hz(segments, material) - 15.2,
+        },
+        "launch_simulation": simulate_launch(cpm, head_speed_mph),
+        "gcode": generate_mandrel_gcode(
+            segments,
+            units=gcode_units,
+            rapid_feed=gcode_rapid_feed,
+            cut_feed=gcode_cut_feed,
+            spin_feed=gcode_spin_feed,
+            spindle_rpm=gcode_spindle_rpm,
+            tool_number=gcode_tool_number,
+            pass_count=gcode_pass_count,
+        ),
+        "doe_sweep": doe_sweep(cpm, target_cpm),
+        "wrapping_angle_optimization": wrapping_angle_sweep(target_cpm),
+        "manufacturing_method": method,
+        "experimental_library": MANUFACTURING_METHODS,
+        "materials": {name: asdict(value) for name, value in MATERIALS.items()},
     }
 
 
@@ -66,66 +385,235 @@ def home() -> str:
   <title>Golf Shaft Design Studio</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; background: #f4f7f6; color: #17211f; }
-    header { background: #0f3d38; color: white; padding: 24px; }
-    main { padding: 24px; display: grid; grid-template-columns: 320px 1fr; gap: 18px; }
-    section { background: white; border: 1px solid #dbe4e1; border-radius: 8px; padding: 18px; }
-    label { display: block; margin-top: 12px; font-weight: bold; }
-    input, button { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 6px; }
-    button { background: #17695f; color: white; border: 0; border-radius: 6px; font-weight: bold; cursor: pointer; }
-    .cards { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #f3f6f4; color: #17211f; }
+    header { background: #0e3b36; color: white; padding: 22px 26px; }
+    h1 { margin: 0; font-size: 28px; }
+    header p { margin: 8px 0 0; color: #d6e8e4; }
+    main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px; }
+    section { background: white; border: 1px solid #dbe4e1; border-radius: 8px; padding: 16px; }
+    label { display: block; margin-top: 12px; font-size: 13px; font-weight: 700; }
+    input, select, button { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 5px; border: 1px solid #b9c8c4; border-radius: 6px; font-size: 15px; }
+    button { border: 0; background: #17695f; color: white; font-weight: 700; cursor: pointer; margin-top: 16px; }
+    button.secondary { background: #4d5f5b; }
+    .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .panel-title { margin-top: 18px; padding-top: 14px; border-top: 1px solid #dbe4e1; font-size: 16px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }
     .card { background: #eef5f3; border-radius: 8px; padding: 12px; }
-    .card strong { display: block; font-size: 22px; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-    th, td { border-bottom: 1px solid #e2ebe8; padding: 9px; text-align: left; }
-    pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; overflow: auto; }
-    @media (max-width: 800px) { main { grid-template-columns: 1fr; } .cards { grid-template-columns: 1fr 1fr; } }
+    .card span { display: block; font-size: 12px; color: #50615e; }
+    .card strong { display: block; margin-top: 5px; font-size: 22px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border-bottom: 1px solid #e3ebe8; padding: 8px; text-align: left; }
+    th { color: #50615e; font-size: 13px; }
+    canvas { width: 100%; height: 230px; border: 1px solid #e2ebe8; border-radius: 8px; margin-top: 10px; }
+    pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; max-height: 300px; overflow: auto; }
+    @media (max-width: 900px) { main, .grid2 { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
 <body>
   <header>
     <h1>Golf Shaft Design Studio</h1>
-    <p>CPM-first cloud prototype for composite golf shaft design.</p>
+    <p>CPM-first composite shaft design with EI, torsion, fatigue, launch simulation, and experimental weave analysis.</p>
   </header>
   <main>
     <section>
-      <h2>Inputs</h2>
+      <h2>Design Inputs</h2>
       <label>Target CPM</label>
-      <input id="target" type="number" value="255">
+      <input id="target" type="number" value="255" step="0.1">
       <label>Head Weight (g)</label>
-      <input id="head" type="number" value="205">
+      <input id="head" type="number" value="205" step="1">
+      <label>Club Speed (mph)</label>
+      <input id="speed" type="number" value="105" step="1">
+      <label>Wrap Angle (degrees)</label>
+      <input id="angle" type="number" value="45" step="1">
+      <label>Material</label>
+      <select id="material">
+        <option>Mitsubishi MR70</option>
+        <option>Toray T1100G</option>
+        <option>Hexcel IM7</option>
+      </select>
+      <label>Manufacturing Method</label>
+      <select id="method">
+        <option value="roll_wrapped">Roll-wrapped prepreg</option>
+        <option value="tubular_braid">Seamless tubular braid</option>
+        <option value="filament_winding">Filament winding</option>
+        <option value="hybrid_3d">3D multi-axial hybrid weave</option>
+        <option value="automated_tape">Automated tape winding</option>
+      </select>
+      <h3 class="panel-title">G-Code Settings</h3>
+      <label>Units</label>
+      <select id="gcodeUnits">
+        <option value="mm">Millimeters (G21)</option>
+        <option value="inch">Inches (G20)</option>
+      </select>
+      <div class="mini-grid">
+        <div>
+          <label>Tool #</label>
+          <input id="toolNumber" type="number" value="1" step="1" min="1">
+        </div>
+        <div>
+          <label>Passes</label>
+          <input id="passCount" type="number" value="1" step="1" min="1" max="8">
+        </div>
+      </div>
+      <label>Spindle RPM</label>
+      <input id="spindleRpm" type="number" value="1200" step="50" min="0">
+      <div class="mini-grid">
+        <div>
+          <label>Rapid Feed</label>
+          <input id="rapidFeed" type="number" value="600" step="10" min="1">
+        </div>
+        <div>
+          <label>Cut Feed</label>
+          <input id="cutFeed" type="number" value="180" step="10" min="1">
+        </div>
+      </div>
+      <label>Spin Feed</label>
+      <input id="spinFeed" type="number" value="300" step="10" min="1">
       <button onclick="run()">Analyze Shaft</button>
+      <button class="secondary" onclick="downloadJson()">Export JSON</button>
+      <button class="secondary" onclick="downloadGcode()">Export G-Code</button>
       <p><a href="/docs">Developer API tester</a></p>
     </section>
     <section>
       <h2>Results</h2>
-      <div class="cards">
-        <div class="card">Overall CPM<strong id="cpm">-</strong></div>
-        <div class="card">CPM Error<strong id="error">-</strong></div>
-        <div class="card">Mass<strong id="mass">-</strong></div>
-        <div class="card">Deflection<strong id="deflection">-</strong></div>
+      <div class="metrics">
+        <div class="card"><span>Overall CPM</span><strong id="cpm">-</strong></div>
+        <div class="card"><span>CPM Error</span><strong id="error">-</strong></div>
+        <div class="card"><span>Mass</span><strong id="mass">-</strong></div>
+        <div class="card"><span>Torsion</span><strong id="torsion">-</strong></div>
       </div>
-      <h3>7-Zone CPM Profile</h3>
-      <table><thead><tr><th>Station</th><th>CPM</th></tr></thead><tbody id="zones"></tbody></table>
-      <h3>Experimental Library</h3>
-      <pre id="methods"></pre>
+      <div class="grid2">
+        <div>
+          <h3>7-Zone CPM Profile</h3>
+          <canvas id="cpmChart" width="640" height="260"></canvas>
+          <table><thead><tr><th>Station</th><th>CPM</th></tr></thead><tbody id="zones"></tbody></table>
+        </div>
+        <div>
+          <h3>Trackman-Style Launch Estimate</h3>
+          <table><tbody id="launch"></tbody></table>
+          <h3>Engineering Analytics</h3>
+          <table><tbody id="analytics"></tbody></table>
+        </div>
+      </div>
+      <h3>Experimental / Manufacturing Library</h3>
+      <pre id="library"></pre>
+      <h3>Mandrel / Taper G-Code</h3>
+      <pre id="gcode"></pre>
     </section>
   </main>
   <script>
+    let latest = null;
+
     async function run() {
-      const target = document.getElementById('target').value;
-      const head = document.getElementById('head').value;
-      const res = await fetch(`/api/analyze?target_cpm=${target}&head_weight_g=${head}`);
-      const data = await res.json();
-      document.getElementById('cpm').textContent = data.overall_cpm.toFixed(1);
-      document.getElementById('error').textContent = data.cpm_error.toFixed(1);
-      document.getElementById('mass').textContent = data.mass_g.toFixed(1) + ' g';
-      document.getElementById('deflection').textContent = data.tip_deflection_mm_100n.toFixed(1) + ' mm';
-      document.getElementById('zones').innerHTML = data.zone_profile.map(
+      const params = new URLSearchParams({
+        target_cpm: document.getElementById('target').value,
+        head_weight_g: document.getElementById('head').value,
+        material_name: document.getElementById('material').value,
+        method_key: document.getElementById('method').value,
+        wrap_angle_deg: document.getElementById('angle').value,
+        head_speed_mph: document.getElementById('speed').value,
+        gcode_units: document.getElementById('gcodeUnits').value,
+        gcode_rapid_feed: document.getElementById('rapidFeed').value,
+        gcode_cut_feed: document.getElementById('cutFeed').value,
+        gcode_spin_feed: document.getElementById('spinFeed').value,
+        gcode_spindle_rpm: document.getElementById('spindleRpm').value,
+        gcode_tool_number: document.getElementById('toolNumber').value,
+        gcode_pass_count: document.getElementById('passCount').value
+      });
+      const res = await fetch('/api/analyze?' + params.toString());
+      latest = await res.json();
+
+      document.getElementById('cpm').textContent = latest.overall_cpm.toFixed(1);
+      document.getElementById('error').textContent = latest.cpm_error.toFixed(1);
+      document.getElementById('mass').textContent = latest.mass_g.toFixed(1) + ' g';
+      document.getElementById('torsion').textContent = latest.torsion_deflection_deg_15nm.toFixed(1) + ' deg';
+
+      document.getElementById('zones').innerHTML = latest.zone_profile.map(
         z => `<tr><td>${z.station_in}"</td><td>${z.cpm.toFixed(1)}</td></tr>`
       ).join('');
-      document.getElementById('methods').textContent = JSON.stringify(data.experimental_methods, null, 2);
+
+      const launch = latest.launch_simulation;
+      document.getElementById('launch').innerHTML = [
+        ['Club Speed', launch.club_speed_mph.toFixed(1) + ' mph'],
+        ['Ball Speed', launch.ball_speed_mph.toFixed(1) + ' mph'],
+        ['Launch Angle', launch.launch_angle_deg.toFixed(1) + ' deg'],
+        ['Spin', launch.spin_rpm.toFixed(0) + ' rpm'],
+        ['Carry', launch.carry_yards.toFixed(1) + ' yd']
+      ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+
+      document.getElementById('analytics').innerHTML = [
+        ['Tip Deflection @100N', latest.tip_deflection_mm_100n.toFixed(1) + ' mm'],
+        ['Natural Frequency', latest.natural_frequency_hz.toFixed(2) + ' Hz'],
+        ['Fatigue Cycles', latest.fatigue_cycles_estimate.toExponential(2)],
+        ['Material Cost', '$' + latest.material_cost_usd.toFixed(2)],
+        ['Best Wrap Angle', latest.wrapping_angle_optimization.best.angle_deg + ' deg']
+      ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+
+      document.getElementById('library').textContent = JSON.stringify({
+        selected_method: latest.manufacturing_method,
+        taper_ratios: latest.taper_ratios,
+        doe_sweep: latest.doe_sweep,
+        ei_profile: latest.ei_profile
+      }, null, 2);
+      document.getElementById('gcode').textContent = latest.gcode;
+
+      drawChart(latest.zone_profile);
     }
+
+    function drawChart(profile) {
+      const canvas = document.getElementById('cpmChart');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const pad = 34;
+      const max = Math.max(...profile.map(p => p.cpm));
+      const min = Math.min(...profile.map(p => p.cpm));
+      ctx.strokeStyle = '#d4e0dd';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 5; i++) {
+        const y = pad + i * (canvas.height - 2 * pad) / 4;
+        ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(canvas.width - pad, y); ctx.stroke();
+      }
+      ctx.strokeStyle = '#17695f';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      profile.forEach((p, i) => {
+        const x = pad + i * (canvas.width - 2 * pad) / (profile.length - 1);
+        const y = canvas.height - pad - (p.cpm - min) / (max - min || 1) * (canvas.height - 2 * pad);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.fillStyle = '#0f3d38';
+      profile.forEach((p, i) => {
+        const x = pad + i * (canvas.width - 2 * pad) / (profile.length - 1);
+        const y = canvas.height - pad - (p.cpm - min) / (max - min || 1) * (canvas.height - 2 * pad);
+        ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillText(p.station_in + '"', x - 10, canvas.height - 10);
+      });
+    }
+
+    function downloadJson() {
+      if (!latest) return;
+      const blob = new Blob([JSON.stringify(latest, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-design-analysis.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadGcode() {
+      if (!latest) return;
+      const blob = new Blob([latest.gcode], {type: 'text/plain'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-mandrel-toolpath.nc';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
     run();
   </script>
 </body>
@@ -139,6 +627,68 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/analyze")
-def api_analyze(target_cpm: float = 255.0, head_weight_g: float = 205.0) -> dict[str, Any]:
-    return analyze_shaft(target_cpm=target_cpm, head_weight_g=head_weight_g)
+def api_analyze(
+    target_cpm: float = 255.0,
+    head_weight_g: float = 205.0,
+    material_name: str = "Mitsubishi MR70",
+    method_key: str = "roll_wrapped",
+    wrap_angle_deg: float = 45.0,
+    head_speed_mph: float = 105.0,
+    gcode_units: str = "mm",
+    gcode_rapid_feed: float = 600.0,
+    gcode_cut_feed: float = 180.0,
+    gcode_spin_feed: float = 300.0,
+    gcode_spindle_rpm: int = 1200,
+    gcode_tool_number: int = 1,
+    gcode_pass_count: int = 1,
+) -> dict[str, Any]:
+    return analyze_shaft(
+        target_cpm=target_cpm,
+        head_weight_g=head_weight_g,
+        material_name=material_name,
+        method_key=method_key,
+        wrap_angle_deg=wrap_angle_deg,
+        head_speed_mph=head_speed_mph,
+        gcode_units=gcode_units,
+        gcode_rapid_feed=gcode_rapid_feed,
+        gcode_cut_feed=gcode_cut_feed,
+        gcode_spin_feed=gcode_spin_feed,
+        gcode_spindle_rpm=gcode_spindle_rpm,
+        gcode_tool_number=gcode_tool_number,
+        gcode_pass_count=gcode_pass_count,
+    )
 
+
+@app.get("/api/gcode")
+def api_gcode(
+    wrap_angle_deg: float = 45.0,
+    gcode_units: str = "mm",
+    gcode_rapid_feed: float = 600.0,
+    gcode_cut_feed: float = 180.0,
+    gcode_spin_feed: float = 300.0,
+    gcode_spindle_rpm: int = 1200,
+    gcode_tool_number: int = 1,
+    gcode_pass_count: int = 1,
+) -> dict[str, str]:
+    return {
+        "gcode": generate_mandrel_gcode(
+            default_segments(base_angle=wrap_angle_deg),
+            units=gcode_units,
+            rapid_feed=gcode_rapid_feed,
+            cut_feed=gcode_cut_feed,
+            spin_feed=gcode_spin_feed,
+            spindle_rpm=gcode_spindle_rpm,
+            tool_number=gcode_tool_number,
+            pass_count=gcode_pass_count,
+        )
+    }
+
+
+@app.get("/api/materials")
+def api_materials() -> dict[str, Any]:
+    return {name: asdict(material) for name, material in MATERIALS.items()}
+
+
+@app.get("/api/manufacturing-methods")
+def api_methods() -> dict[str, Any]:
+    return MANUFACTURING_METHODS
