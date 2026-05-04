@@ -583,6 +583,14 @@ def home() -> str:
     .tape-summary { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; }
     .tape-summary h3 { margin-top: 0; }
     .tape-badge { display: inline-block; background: #17211f; color: #d7fff6; padding: 4px 8px; border-radius: 999px; margin: 3px; font-size: 12px; font-weight: 700; }
+    .stack-board { display: grid; grid-template-columns: 1fr 420px; gap: 14px; align-items: start; }
+    .stack-canvas { height: 520px; background: #101918; border-color: #344642; }
+    .stack-layer { display: grid; grid-template-columns: 42px 1fr 76px; gap: 8px; align-items: center; background: #eef5f3; border: 1px solid #cbd8d5; border-radius: 6px; padding: 8px; margin: 7px 0; }
+    .stack-layer strong { display: block; }
+    .stack-layer span { color: #50615e; font-size: 12px; }
+    .stack-layer button { margin: 0; padding: 6px; }
+    .stack-summary { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; }
+    .stack-summary h3 { margin-top: 0; }
     pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; max-height: 300px; overflow: auto; }
     @media (max-width: 900px) { main, .grid2 { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } }
   </style>
@@ -677,6 +685,7 @@ def home() -> str:
           <button class="tab" id="drawTab" onclick="showView('drawing')">Design / Drawing</button>
           <button class="tab" id="flagTab" onclick="showView('flags')">Flag CAD</button>
           <button class="tab" id="tapeTab" onclick="showView('tape')">TapeCAD</button>
+          <button class="tab" id="stackTab" onclick="showView('stack')">StackCAD</button>
           <button class="tab" id="cad3dTab" onclick="showView('cad3d')">3D CAD</button>
         </div>
       </div>
@@ -871,6 +880,29 @@ def home() -> str:
           <tbody id="tapeRows"></tbody>
         </table>
       </div>
+      <div id="stackView" class="view hidden">
+        <div class="cad-strip">
+          <div class="cad-chip">Module<strong>StackCAD</strong></div>
+          <div class="cad-chip">Layers<strong id="stackLayerCount">-</strong></div>
+          <div class="cad-chip">Build Mass<strong id="stackMass">-</strong></div>
+          <div class="cad-chip">Process<strong>Braid/Tape/Flag</strong></div>
+        </div>
+        <h3>Layer Stack / Manufacturing Build Sequence</h3>
+        <div class="stack-board">
+          <div>
+            <canvas class="stack-canvas" id="stackCanvas" width="1120" height="520"></canvas>
+          </div>
+          <div class="stack-summary">
+            <h3>Build Sheet Controls</h3>
+            <button onclick="regenerateStack(this)">Regenerate from CAD Objects</button>
+            <button class="secondary" onclick="downloadStackJson(this)">Export Stack JSON</button>
+            <button class="secondary" onclick="downloadBuildSheet(this)">Export Build Sheet</button>
+            <table><tbody id="stackSummary"></tbody></table>
+          </div>
+        </div>
+        <h3>Layer Order</h3>
+        <div id="stackRows"></div>
+      </div>
       <div id="cad3dView" class="view hidden">
         <div class="cad-strip">
           <div class="cad-chip">Model<strong>Composite Shaft</strong></div>
@@ -937,6 +969,7 @@ def home() -> str:
     let latest = null;
     let flags = defaultFlags();
     let tapes = defaultTapes();
+    let stackLayers = [];
     let flagGeometry = [];
     let activeDrag = null;
     let selectedFlagIndex = null;
@@ -1013,28 +1046,33 @@ def home() -> str:
       const drawing = document.getElementById('drawingView');
       const flagView = document.getElementById('flagView');
       const tapeView = document.getElementById('tapeView');
+      const stackView = document.getElementById('stackView');
       const cad3dView = document.getElementById('cad3dView');
       const simTab = document.getElementById('simTab');
       const fitTab = document.getElementById('fitTab');
       const drawTab = document.getElementById('drawTab');
       const flagTab = document.getElementById('flagTab');
       const tapeTab = document.getElementById('tapeTab');
+      const stackTab = document.getElementById('stackTab');
       const cad3dTab = document.getElementById('cad3dTab');
       simulation.classList.toggle('hidden', viewName !== 'simulation');
       fitView.classList.toggle('hidden', viewName !== 'fit');
       drawing.classList.toggle('hidden', viewName !== 'drawing');
       flagView.classList.toggle('hidden', viewName !== 'flags');
       tapeView.classList.toggle('hidden', viewName !== 'tape');
+      stackView.classList.toggle('hidden', viewName !== 'stack');
       cad3dView.classList.toggle('hidden', viewName !== 'cad3d');
       simTab.classList.toggle('active', viewName === 'simulation');
       fitTab.classList.toggle('active', viewName === 'fit');
       drawTab.classList.toggle('active', viewName === 'drawing');
       flagTab.classList.toggle('active', viewName === 'flags');
       tapeTab.classList.toggle('active', viewName === 'tape');
+      stackTab.classList.toggle('active', viewName === 'stack');
       cad3dTab.classList.toggle('active', viewName === 'cad3d');
       if (viewName === 'drawing' && latest) drawDesign(latest);
       if (viewName === 'flags') renderFlagEditor();
       if (viewName === 'tape') renderTapeCad();
+      if (viewName === 'stack') renderStackCad();
       if (viewName === 'cad3d') {
         updateArchitecturePanel();
         drawCad3d();
@@ -1129,6 +1167,7 @@ def home() -> str:
       drawDesign(latest);
       renderFlagEditor();
       renderTapeCad();
+      renderStackCad();
       drawCad3d();
       writeCadConsole('Analysis complete. CadQuery STEP recipe ready for export.');
     }
@@ -1885,6 +1924,8 @@ ${y2.toFixed(3)}
       drawChart(latest.zone_profile);
       drawDesign(latest);
       renderTapeCad();
+      stackLayers = generatedStackLayers();
+      renderStackCad();
       drawCad3d();
     }
 
@@ -1922,6 +1963,8 @@ ${y2.toFixed(3)}
       };
       drawTapeCad();
       refreshTapeEngineering();
+      stackLayers = generatedStackLayers();
+      renderStackCad();
       drawCad3d();
     }
 
@@ -1930,6 +1973,8 @@ ${y2.toFixed(3)}
       tapes.push({name: 'New UD tape strip', startIn: 31, length: 200, width: 10, thickness: 0.125, angle: 0, layer: 'between braid layers'});
       renderTapeCad();
       refreshTapeEngineering();
+      stackLayers = generatedStackLayers();
+      renderStackCad();
       drawCad3d();
     }
 
@@ -1939,6 +1984,8 @@ ${y2.toFixed(3)}
       tapes.push({name: 'Bias -45 tape', startIn: 21, length: 190, width: 10, thickness: 0.125, angle: -45, layer: 'torque pair'});
       renderTapeCad();
       refreshTapeEngineering();
+      stackLayers = generatedStackLayers();
+      renderStackCad();
       drawCad3d();
     }
 
@@ -1947,6 +1994,8 @@ ${y2.toFixed(3)}
       tapes.splice(index, 1);
       renderTapeCad();
       refreshTapeEngineering();
+      stackLayers = generatedStackLayers();
+      renderStackCad();
       drawCad3d();
     }
 
@@ -1955,6 +2004,8 @@ ${y2.toFixed(3)}
       tapes = defaultTapes();
       renderTapeCad();
       refreshTapeEngineering();
+      stackLayers = generatedStackLayers();
+      renderStackCad();
       drawCad3d();
     }
 
@@ -2068,6 +2119,212 @@ ${y2.toFixed(3)}
       URL.revokeObjectURL(url);
     }
 
+    function flagMassEstimate(flag) {
+      const area = ((Number(flag.root) + Number(flag.tip)) / 2) * Number(flag.length);
+      return area * 0.000125 * 0.0016;
+    }
+
+    function layerColorByType(type) {
+      const colors = {
+        mandrel: '#8b5a22',
+        braid: '#86fff2',
+        tape: '#f2b84b',
+        flag: '#d7fff6',
+        hoop: '#caffbf',
+        cure: '#ff7de9'
+      };
+      return colors[type] || '#e0c3fc';
+    }
+
+    function generatedStackLayers() {
+      const layers = [
+        {type: 'mandrel', name: 'Mandrel prep / release system', station: 'full length', angle: '-', mass_g: 0, stiffness: 0, instruction: 'Clean mandrel, apply release system, verify taper and surface finish.'},
+        {type: 'braid', name: 'Inner braided sleeve', station: 'full length', angle: '+/-45', mass_g: 7.5, stiffness: 0.9, instruction: 'Install inner braid sleeve over mandrel and align braid angle before compaction.'}
+      ];
+
+      tapes.forEach(tape => {
+        layers.push({
+          type: Math.abs(Number(tape.angle)) === 90 ? 'hoop' : 'tape',
+          name: tape.name,
+          station: `${tape.startIn}" start, ${tape.length} mm`,
+          angle: `${tape.angle} deg`,
+          mass_g: Number(tape.length) * Number(tape.width) * Number(tape.thickness) * 0.0016,
+          stiffness: tapeStiffnessIndexAtStation(Number(tape.startIn)),
+          instruction: `Apply ${tape.width} mm tape at ${tape.angle} degrees, ${tape.layer}.`
+        });
+      });
+
+      flags.forEach(flag => {
+        layers.push({
+          type: 'flag',
+          name: flag.name,
+          station: flag.station,
+          angle: `${flag.angle} deg`,
+          mass_g: flagMassEstimate(flag),
+          stiffness: Math.abs(Number(flag.angle)) === 0 ? 0.8 : 0.45,
+          instruction: `Wrap ${flag.name} flag at ${flag.angle} degrees in ${flag.station} section.`
+        });
+      });
+
+      layers.push(
+        {type: 'braid', name: 'Outer braided sleeve', station: 'full length', angle: '+/-45', mass_g: 8.2, stiffness: 1.05, instruction: 'Install outer braid sleeve and consolidate tape/flag stack.'},
+        {type: 'cure', name: 'Shrink tape / cure wrap', station: 'full length', angle: 'spiral', mass_g: 0, stiffness: 0, instruction: 'Apply shrink tape, cure per material schedule, cool, extract mandrel, trim, and inspect.'}
+      );
+
+      return layers.map((layer, index) => ({...layer, order: index + 1}));
+    }
+
+    function ensureStackLayers() {
+      if (!stackLayers.length) stackLayers = generatedStackLayers();
+      return stackLayers;
+    }
+
+    function regenerateStack(button) {
+      flashButton(button, 'Generated');
+      stackLayers = generatedStackLayers();
+      renderStackCad();
+    }
+
+    function moveStackLayer(index, direction) {
+      const next = index + direction;
+      if (next < 0 || next >= stackLayers.length) return;
+      const temp = stackLayers[index];
+      stackLayers[index] = stackLayers[next];
+      stackLayers[next] = temp;
+      stackLayers = stackLayers.map((layer, orderIndex) => ({...layer, order: orderIndex + 1}));
+      renderStackCad();
+    }
+
+    function stackMassGrams() {
+      return ensureStackLayers().reduce((sum, layer) => sum + Number(layer.mass_g || 0), 0);
+    }
+
+    function stackStiffnessIndex() {
+      return ensureStackLayers().reduce((sum, layer) => sum + Number(layer.stiffness || 0), 0);
+    }
+
+    function renderStackCad() {
+      ensureStackLayers();
+      renderStackRows();
+      drawStackCad();
+    }
+
+    function renderStackRows() {
+      const rows = ensureStackLayers().map((layer, index) => `
+        <div class="stack-layer">
+          <div style="color:${layerColorByType(layer.type)}; font-weight:900;">${layer.order}</div>
+          <div>
+            <strong>${layer.name}</strong>
+            <span>${layer.type} | ${layer.station} | ${layer.angle} | ${Number(layer.mass_g).toFixed(2)} g</span>
+          </div>
+          <div>
+            <button class="secondary" onclick="moveStackLayer(${index}, -1)">Up</button>
+            <button class="secondary" onclick="moveStackLayer(${index}, 1)">Down</button>
+          </div>
+        </div>
+      `).join('');
+      const container = document.getElementById('stackRows');
+      if (container) container.innerHTML = rows;
+    }
+
+    function drawStackCad() {
+      const canvas = document.getElementById('stackCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const layers = ensureStackLayers();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#101918';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#163c3a';
+      ctx.setLineDash([4, 8]);
+      for (let x = 50; x < canvas.width; x += 50) {
+        ctx.beginPath(); ctx.moveTo(x, 40); ctx.lineTo(x, canvas.height - 40); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#d7fff6';
+      ctx.font = '14px Arial';
+      ctx.fillText('Mandrel outward build sequence', 70, 38);
+
+      const startX = 90;
+      const width = canvas.width - 180;
+      const layerHeight = Math.min(34, (canvas.height - 100) / Math.max(layers.length, 1));
+      layers.forEach((layer, index) => {
+        const y = 72 + index * (layerHeight + 7);
+        ctx.fillStyle = layerColorByType(layer.type);
+        ctx.globalAlpha = 0.2;
+        ctx.fillRect(startX, y, width, layerHeight);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = layerColorByType(layer.type);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX, y, width, layerHeight);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`${layer.order}. ${layer.name}`, startX + 12, y + 21);
+        ctx.fillStyle = '#d7fff6';
+        ctx.fillText(`${layer.angle} | ${Number(layer.mass_g).toFixed(2)} g`, startX + width - 190, y + 21);
+      });
+
+      document.getElementById('stackLayerCount').textContent = String(layers.length);
+      document.getElementById('stackMass').textContent = stackMassGrams().toFixed(1) + ' g';
+      document.getElementById('stackSummary').innerHTML = [
+        ['Total layer count', layers.length],
+        ['Estimated layer mass', stackMassGrams().toFixed(2) + ' g'],
+        ['Stack stiffness index', stackStiffnessIndex().toFixed(2)],
+        ['Tape schedule linked', `${tapes.length} tape strips`],
+        ['Flag schedule linked', `${flags.length} flags`]
+      ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
+    }
+
+    function stackPayload() {
+      return {
+        module: 'StackCAD',
+        architecture: document.getElementById('architectureMode').value,
+        generated_from: ['FlagCAD', 'TapeCAD', 'Braid architecture'],
+        estimated_layer_mass_g: stackMassGrams(),
+        stiffness_index: stackStiffnessIndex(),
+        layers: ensureStackLayers()
+      };
+    }
+
+    function downloadStackJson(button) {
+      flashButton(button, 'Exported');
+      const blob = new Blob([JSON.stringify(stackPayload(), null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-stackcad-build.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function buildSheetText() {
+      const payload = stackPayload();
+      const lines = [
+        'AE ShaftCAD Studio - Build Sheet',
+        `Architecture: ${payload.architecture}`,
+        `Estimated layer mass: ${payload.estimated_layer_mass_g.toFixed(2)} g`,
+        `Stiffness index: ${payload.stiffness_index.toFixed(2)}`,
+        '',
+        'Layer sequence:'
+      ];
+      payload.layers.forEach(layer => {
+        lines.push(`${layer.order}. ${layer.name}`);
+        lines.push(`   Type: ${layer.type} | Station: ${layer.station} | Angle: ${layer.angle} | Mass: ${Number(layer.mass_g).toFixed(2)} g`);
+        lines.push(`   Instruction: ${layer.instruction}`);
+      });
+      return lines.join('\n');
+    }
+
+    function downloadBuildSheet(button) {
+      flashButton(button, 'Exported');
+      const blob = new Blob([buildSheetText()], {type: 'text/plain'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ae-shaftcad-build-sheet.txt';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
     function currentProject() {
       return {
         version: 1,
@@ -2083,7 +2340,8 @@ ${y2.toFixed(3)}
         },
         gcode: latest ? latest.gcode_settings : {},
         flags,
-        tapes
+        tapes,
+        stack_layers: ensureStackLayers()
       };
     }
 
@@ -2120,6 +2378,10 @@ ${y2.toFixed(3)}
         if (Array.isArray(project.tapes)) {
           tapes = project.tapes;
           renderTapeCad();
+        }
+        if (Array.isArray(project.stack_layers)) {
+          stackLayers = project.stack_layers;
+          renderStackCad();
         }
         run();
       };
@@ -2534,6 +2796,11 @@ method = "${document.getElementById('method').value}"`
     window.deleteTape = deleteTape;
     window.resetTapes = resetTapes;
     window.downloadTapeJson = downloadTapeJson;
+    window.renderStackCad = renderStackCad;
+    window.regenerateStack = regenerateStack;
+    window.moveStackLayer = moveStackLayer;
+    window.downloadStackJson = downloadStackJson;
+    window.downloadBuildSheet = downloadBuildSheet;
     window.downloadCadScript = downloadCadScript;
     window.downloadJson = downloadJson;
     window.downloadGcode = downloadGcode;
