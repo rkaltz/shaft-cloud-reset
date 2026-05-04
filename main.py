@@ -504,7 +504,9 @@ def home() -> str:
     .brand-mark { display: inline-grid; place-items: center; width: 42px; height: 42px; border: 2px solid #d7fff6; border-radius: 6px; font-weight: 900; color: #d7fff6; margin-right: 10px; }
     .brand-row { display: flex; align-items: center; }
     .build-badge { border: 1px solid #4e7f76; color: #d7fff6; padding: 7px 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
-    main { display: grid; grid-template-columns: 340px 1fr; gap: 0; min-height: calc(100vh - 78px); }
+    .app-status { background: #d7fff6; color: #17211f; border-bottom: 1px solid #9fc8c0; padding: 8px 18px; font-size: 13px; font-weight: 800; }
+    .app-status.bad { background: #ffe1df; color: #8a1f16; border-color: #df9b95; }
+    main { display: grid; grid-template-columns: 340px 1fr; gap: 0; min-height: calc(100vh - 111px); }
     section { background: #f8fbfa; border-right: 1px solid #b9c8c4; padding: 16px; }
     section.workspace { background: #eef2f0; border-right: 0; padding: 0; }
     .workspace-head { display: flex; justify-content: space-between; align-items: center; background: #ffffff; border-bottom: 1px solid #cdd9d6; padding: 12px 14px; }
@@ -606,6 +608,7 @@ def home() -> str:
     </div>
     <div class="build-badge">Prototype CAD kernel: shaft-native</div>
   </header>
+  <div id="appStatus" class="app-status">AE boot check: HTML loaded. JavaScript has not confirmed yet.</div>
   <main>
     <section>
       <h2>Design Inputs</h2>
@@ -1014,13 +1017,27 @@ def home() -> str:
       }
     };
 
+    function setAppStatus(message, isBad) {
+      const status = document.getElementById('appStatus');
+      if (!status) return;
+      status.textContent = message;
+      status.classList.toggle('bad', Boolean(isBad));
+    }
+
     window.onerror = function(message, source, line, column) {
+      setAppStatus(`JavaScript crashed: ${message} at ${line}:${column}`, true);
       const consolePanel = document.getElementById('cadConsole');
       if (consolePanel) {
         consolePanel.textContent += `\n[APP ERROR] ${message} at ${line}:${column}`;
       }
       return false;
     };
+
+    window.addEventListener('unhandledrejection', event => {
+      const reason = event.reason?.message || event.reason || 'unknown promise failure';
+      setAppStatus(`Async app error: ${reason}`, true);
+      writeCadConsole(`Async app error: ${reason}`);
+    });
 
     function defaultFlags() {
       return [
@@ -2785,8 +2802,15 @@ method = "${document.getElementById('method').value}"`
 
     function safeInvoke(name, callback) {
       try {
-        callback();
+        const result = callback();
+        if (result && typeof result.catch === 'function') {
+          result.catch(error => {
+            setAppStatus(`${name} failed: ${error.message || String(error)}`, true);
+            writeCadConsole(`${name} failed: ${error.message || String(error)}`);
+          });
+        }
       } catch (error) {
+        setAppStatus(`${name} failed: ${error.message || String(error)}`, true);
         writeCadConsole(`${name} failed: ${error.message || String(error)}`);
       }
     }
@@ -2801,37 +2825,57 @@ method = "${document.getElementById('method').value}"`
       });
     }
 
+    function buttonRoutes() {
+      return {
+        simTab: () => showView('simulation'),
+        fitTab: () => showView('fit'),
+        drawTab: () => showView('drawing'),
+        flagTab: () => showView('flags'),
+        tapeTab: () => showView('tape'),
+        stackTab: () => showView('stack'),
+        cad3dTab: () => showView('cad3d'),
+        analyzeBtn: button => run(button),
+        exportJsonBtn: button => downloadJson(button),
+        exportGcodeBtn: button => downloadGcode(button),
+        fitGenerateBtn: button => runFitToBuild(button),
+        fitApplyBtn: button => applyFitToCad(button),
+        fitExportBtn: button => downloadFitProfile(button),
+        flagAddBtn: button => addFlag(button),
+        flagTriangleBtn: button => addTriangleFlag(button),
+        flagResetBtn: button => resetFlags(button),
+        flagJsonBtn: button => downloadFlagJson(button),
+        flagSvgBtn: button => downloadFlagSvg(button),
+        flagDxfBtn: button => downloadFlagDxf(button),
+        projectSaveBtn: button => downloadProject(button),
+        projectLoadBtn: () => document.getElementById('projectFile')?.click(),
+        tapeAddBtn: button => addTape(button),
+        tapeBiasBtn: button => addBiasTapePair(button),
+        tapeResetBtn: button => resetTapes(button),
+        tapeJsonBtn: button => downloadTapeJson(button),
+        stackGenerateBtn: button => regenerateStack(button),
+        stackJsonBtn: button => downloadStackJson(button),
+        stackSheetBtn: button => downloadBuildSheet(button),
+        cadExportBtn: button => downloadCadScript(button)
+      };
+    }
+
+    function emergencyClickRouter(event) {
+      const button = event.target?.closest?.('button');
+      if (!button || !button.id) return;
+      const route = buttonRoutes()[button.id];
+      if (!route) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      safeInvoke(button.id, () => route(button));
+    }
+
     function bootstrapButtons() {
-      bindClickById('simTab', () => showView('simulation'));
-      bindClickById('fitTab', () => showView('fit'));
-      bindClickById('drawTab', () => showView('drawing'));
-      bindClickById('flagTab', () => showView('flags'));
-      bindClickById('tapeTab', () => showView('tape'));
-      bindClickById('stackTab', () => showView('stack'));
-      bindClickById('cad3dTab', () => showView('cad3d'));
-      bindClickById('analyzeBtn', button => run(button));
-      bindClickById('exportJsonBtn', button => downloadJson(button));
-      bindClickById('exportGcodeBtn', button => downloadGcode(button));
-      bindClickById('fitGenerateBtn', button => runFitToBuild(button));
-      bindClickById('fitApplyBtn', button => applyFitToCad(button));
-      bindClickById('fitExportBtn', button => downloadFitProfile(button));
-      bindClickById('flagAddBtn', button => addFlag(button));
-      bindClickById('flagTriangleBtn', button => addTriangleFlag(button));
-      bindClickById('flagResetBtn', button => resetFlags(button));
-      bindClickById('flagJsonBtn', button => downloadFlagJson(button));
-      bindClickById('flagSvgBtn', button => downloadFlagSvg(button));
-      bindClickById('flagDxfBtn', button => downloadFlagDxf(button));
-      bindClickById('projectSaveBtn', button => downloadProject(button));
-      bindClickById('projectLoadBtn', () => document.getElementById('projectFile').click());
-      bindClickById('tapeAddBtn', button => addTape(button));
-      bindClickById('tapeBiasBtn', button => addBiasTapePair(button));
-      bindClickById('tapeResetBtn', button => resetTapes(button));
-      bindClickById('tapeJsonBtn', button => downloadTapeJson(button));
-      bindClickById('stackGenerateBtn', button => regenerateStack(button));
-      bindClickById('stackJsonBtn', button => downloadStackJson(button));
-      bindClickById('stackSheetBtn', button => downloadBuildSheet(button));
-      bindClickById('cadExportBtn', button => downloadCadScript(button));
-      writeCadConsole('Button safety bootstrap active: id bindings loaded.');
+      const routes = buttonRoutes();
+      Object.keys(routes).forEach(id => bindClickById(id, button => routes[id](button)));
+      document.removeEventListener('click', emergencyClickRouter, true);
+      document.addEventListener('click', emergencyClickRouter, true);
+      setAppStatus('AE boot OK: JavaScript loaded, buttons bound, emergency click router active.');
+      writeCadConsole('Button safety bootstrap active: id bindings loaded. Emergency click router active.');
     }
 
     window.showView = showView;
@@ -2874,8 +2918,22 @@ method = "${document.getElementById('method').value}"`
     window.downloadGcode = downloadGcode;
     window.bootstrapButtons = bootstrapButtons;
 
-    bootstrapButtons();
-    run().catch(error => writeCadConsole(error.message || String(error)));
+    function bootApp() {
+      setAppStatus('AE boot starting: wiring controls and running first analysis...');
+      bootstrapButtons();
+      run().then(() => {
+        setAppStatus('AE boot OK: controls are live. If a button fails now, the status bar will show the exact error.');
+      }).catch(error => {
+        setAppStatus(`Startup analysis failed: ${error.message || String(error)}`, true);
+        writeCadConsole(error.message || String(error));
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', bootApp);
+    } else {
+      bootApp();
+    }
   </script>
 </body>
 </html>
