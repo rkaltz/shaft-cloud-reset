@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-app = FastAPI(title="Golf Shaft Design Studio", version="1.0")
+app = FastAPI(title="AE ShaftCAD Studio", version="1.1")
 
 
 @dataclass
@@ -77,6 +77,39 @@ MANUFACTURING_METHODS: dict[str, dict[str, Any]] = {
         "mass_factor": 0.92,
         "cost_factor": 1.7,
         "note": "Variable-angle tow/tape placement with local wall-thickness steering.",
+    },
+}
+
+ARCHITECTURE_MODES: dict[str, dict[str, Any]] = {
+    "flag_wrap": {
+        "name": "Flag wrap",
+        "cad_role": "2D prepreg flags wrapped around a tapered mandrel",
+        "exports": ["flag_json", "svg", "dxf", "gcode", "step_recipe"],
+        "design_objects": ["trapezoid_flag", "triangle_flag", "station_constraint", "fiber_angle"],
+    },
+    "helical_wrap": {
+        "name": "Helical wrap",
+        "cad_role": "Continuous tow path with pitch, angle, start station, and end station",
+        "exports": ["helix_path_json", "gcode", "step_recipe"],
+        "design_objects": ["helix_path", "tow_count", "pitch", "coverage"],
+    },
+    "tubular_braid": {
+        "name": "Tubular braid",
+        "cad_role": "Over-under braid sleeve mapped to the shaft taper",
+        "exports": ["braid_json", "coverage_report", "step_recipe"],
+        "design_objects": ["carrier_count", "braid_angle", "sleeve_zone", "coverage"],
+    },
+    "hybrid_flag_helix": {
+        "name": "Hybrid flag + helix",
+        "cad_role": "Conventional flags plus localized spiral reinforcement zones",
+        "exports": ["project_json", "dxf", "gcode", "step_recipe"],
+        "design_objects": ["flag_stack", "helix_zone", "tip_reinforcement", "butt_reinforcement"],
+    },
+    "automated_tape": {
+        "name": "Automated tape placement",
+        "cad_role": "Variable angle tape path with localized wall-thickness control",
+        "exports": ["tape_path_json", "gcode", "step_recipe"],
+        "design_objects": ["steered_tow", "tape_width", "path_station", "course"],
     },
 }
 
@@ -350,6 +383,7 @@ def analyze_shaft(
     material_name: str = "Mitsubishi MR70",
     method_key: str = "roll_wrapped",
     wrap_angle_deg: float = 45.0,
+    architecture_mode: str = "flag_wrap",
     head_speed_mph: float = 105.0,
     gcode_units: str = "mm",
     gcode_rapid_feed: float = 600.0,
@@ -361,6 +395,7 @@ def analyze_shaft(
 ) -> dict[str, Any]:
     material = MATERIALS.get(material_name, MATERIALS["Mitsubishi MR70"])
     method = MANUFACTURING_METHODS.get(method_key, MANUFACTURING_METHODS["roll_wrapped"])
+    architecture = ARCHITECTURE_MODES.get(architecture_mode, ARCHITECTURE_MODES["flag_wrap"])
     segments = default_segments(base_angle=wrap_angle_deg)
     cpm = overall_cpm(segments, material, head_weight_g)
     mass = shaft_mass_kg(segments, material) * method["mass_factor"]
@@ -375,6 +410,7 @@ def analyze_shaft(
             "material": material_name,
             "manufacturing_method": method_key,
             "wrap_angle_deg": wrap_angle_deg,
+            "architecture_mode": architecture_mode,
             "head_speed_mph": head_speed_mph,
         },
         "gcode_settings": {
@@ -432,6 +468,8 @@ def analyze_shaft(
         "doe_sweep": doe_sweep(cpm, target_cpm),
         "wrapping_angle_optimization": wrapping_angle_sweep(target_cpm),
         "manufacturing_method": method,
+        "architecture_mode": architecture,
+        "architecture_library": ARCHITECTURE_MODES,
         "experimental_library": MANUFACTURING_METHODS,
         "materials": {name: asdict(value) for name, value in MATERIALS.items()},
     }
@@ -443,13 +481,16 @@ def home() -> str:
 <!doctype html>
 <html>
 <head>
-  <title>Golf Shaft Design Studio</title>
+  <title>AE ShaftCAD Studio</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { margin: 0; font-family: Arial, sans-serif; background: #dfe6e3; color: #17211f; }
-    header { background: #17211f; color: white; padding: 14px 18px; border-bottom: 4px solid #17695f; }
+    header { background: #17211f; color: white; padding: 14px 18px; border-bottom: 4px solid #17695f; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
     h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
     header p { margin: 6px 0 0; color: #c8d8d4; }
+    .brand-mark { display: inline-grid; place-items: center; width: 42px; height: 42px; border: 2px solid #d7fff6; border-radius: 6px; font-weight: 900; color: #d7fff6; margin-right: 10px; }
+    .brand-row { display: flex; align-items: center; }
+    .build-badge { border: 1px solid #4e7f76; color: #d7fff6; padding: 7px 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
     main { display: grid; grid-template-columns: 340px 1fr; gap: 0; min-height: calc(100vh - 78px); }
     section { background: #f8fbfa; border-right: 1px solid #b9c8c4; padding: 16px; }
     section.workspace { background: #eef2f0; border-right: 0; padding: 0; }
@@ -516,6 +557,11 @@ def home() -> str:
     .sketch-options { display: flex; gap: 14px; align-items: center; margin: 10px 0; font-size: 13px; }
     .sketch-options label { display: flex; gap: 6px; align-items: center; margin: 0; font-weight: 700; }
     .sketch-options input { width: auto; margin: 0; }
+    .architecture-panel { display: grid; grid-template-columns: 1.1fr 1fr; gap: 12px; margin: 12px 0; }
+    .architecture-card { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; }
+    .architecture-card h3 { margin: 0 0 8px; }
+    .object-list { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 6px; }
+    .object-token { background: #e7efec; border: 1px solid #c3d1cd; padding: 7px; border-radius: 5px; font-size: 12px; font-weight: 700; }
     .layer-tag { display: inline-block; padding: 2px 7px; border-radius: 999px; color: #101918; font-weight: 700; font-size: 12px; }
     .editable-table input { margin: 0; padding: 6px; font-size: 13px; }
     .editable-table button { margin: 0; padding: 6px; }
@@ -525,8 +571,14 @@ def home() -> str:
 </head>
 <body>
   <header>
-    <h1>Golf Shaft Design Studio</h1>
-    <p>CPM-first composite shaft design with EI, torsion, fatigue, launch simulation, and experimental weave analysis.</p>
+    <div class="brand-row">
+      <div class="brand-mark">AE</div>
+      <div>
+        <h1>AE ShaftCAD Studio</h1>
+        <p>Physics-driven golf shaft CAD: CPM, EI, fitting, plies, flags, braid paths, mandrels, and manufacturing exports.</p>
+      </div>
+    </div>
+    <div class="build-badge">Prototype CAD kernel: shaft-native</div>
   </header>
   <main>
     <section>
@@ -552,6 +604,14 @@ def home() -> str:
         <option value="filament_winding">Filament winding</option>
         <option value="hybrid_3d">3D multi-axial hybrid weave</option>
         <option value="automated_tape">Automated tape winding</option>
+      </select>
+      <label>CAD Architecture Mode</label>
+      <select id="architectureMode" onchange="updateArchitecturePanel(); drawCad3d();">
+        <option value="flag_wrap">Flag wrap</option>
+        <option value="helical_wrap">Helical wrap</option>
+        <option value="tubular_braid">Tubular braid</option>
+        <option value="hybrid_flag_helix">Hybrid flag + helix</option>
+        <option value="automated_tape">Automated tape placement</option>
       </select>
       <h3 class="panel-title">G-Code Settings</h3>
       <label>Units</label>
@@ -590,7 +650,7 @@ def home() -> str:
     </section>
     <section class="workspace">
       <div class="workspace-head">
-        <div class="workspace-title">Engineering Workspace</div>
+        <div class="workspace-title">AE ShaftCAD Workbench</div>
         <div class="tabs">
           <button class="tab active" id="simTab" onclick="showView('simulation')">Simulation</button>
           <button class="tab" id="fitTab" onclick="showView('fit')">Fit-to-Build</button>
@@ -753,12 +813,22 @@ def home() -> str:
       </div>
       <div id="cad3dView" class="view hidden">
         <div class="cad-strip">
-          <div class="cad-chip">Model<strong>Shaft</strong></div>
-          <div class="cad-chip">Kernel<strong>JSCAD-style</strong></div>
-          <div class="cad-chip">Export<strong>Script</strong></div>
-          <div class="cad-chip">View<strong>Grid</strong></div>
+          <div class="cad-chip">Model<strong>Composite Shaft</strong></div>
+          <div class="cad-chip">Kernel<strong>CadQuery bridge</strong></div>
+          <div class="cad-chip">Architecture<strong id="cadArchitectureChip">Flag wrap</strong></div>
+          <div class="cad-chip">Export<strong>STEP recipe</strong></div>
         </div>
-        <h3>Parametric 3D Shaft / Mandrel Preview</h3>
+        <h3>Parametric 3D Shaft / Mandrel Workbench</h3>
+        <div class="architecture-panel">
+          <div class="architecture-card">
+            <h3>Architecture Mode</h3>
+            <table><tbody id="architectureReadout"></tbody></table>
+          </div>
+          <div class="architecture-card">
+            <h3>Shaft-Native CAD Objects</h3>
+            <div class="object-list" id="architectureObjects"></div>
+          </div>
+        </div>
         <div class="cad-split">
           <div class="code-panel">
             <textarea id="cadScript" spellcheck="false"></textarea>
@@ -811,6 +881,38 @@ def home() -> str:
     let selectedFlagIndex = null;
     let sketchTool = 'select';
     let latestFitProfile = null;
+    const ARCHITECTURES = {
+      flag_wrap: {
+        name: 'Flag wrap',
+        cadRole: '2D prepreg flags wrapped around a tapered mandrel',
+        exports: ['Flag JSON', 'SVG', 'DXF', 'G-code', 'STEP recipe'],
+        objects: ['Trapezoid flag', 'Triangle flag', 'Station constraint', 'Fiber angle']
+      },
+      helical_wrap: {
+        name: 'Helical wrap',
+        cadRole: 'Continuous tow path with pitch, angle, start station, and end station',
+        exports: ['Helix path JSON', 'G-code', 'STEP recipe'],
+        objects: ['Helix path', 'Tow count', 'Pitch', 'Coverage']
+      },
+      tubular_braid: {
+        name: 'Tubular braid',
+        cadRole: 'Over-under braid sleeve mapped to the shaft taper',
+        exports: ['Braid JSON', 'Coverage report', 'STEP recipe'],
+        objects: ['Carrier count', 'Braid angle', 'Sleeve zone', 'Coverage']
+      },
+      hybrid_flag_helix: {
+        name: 'Hybrid flag + helix',
+        cadRole: 'Conventional flags plus localized spiral reinforcement zones',
+        exports: ['Project JSON', 'DXF', 'G-code', 'STEP recipe'],
+        objects: ['Flag stack', 'Helix zone', 'Tip reinforcement', 'Butt reinforcement']
+      },
+      automated_tape: {
+        name: 'Automated tape placement',
+        cadRole: 'Variable angle tape path with localized wall-thickness control',
+        exports: ['Tape path JSON', 'G-code', 'STEP recipe'],
+        objects: ['Steered tow', 'Tape width', 'Path station', 'Course']
+      }
+    };
 
     window.onerror = function(message, source, line, column) {
       const consolePanel = document.getElementById('cadConsole');
@@ -852,7 +954,10 @@ def home() -> str:
       cad3dTab.classList.toggle('active', viewName === 'cad3d');
       if (viewName === 'drawing' && latest) drawDesign(latest);
       if (viewName === 'flags') renderFlagEditor();
-      if (viewName === 'cad3d') drawCad3d();
+      if (viewName === 'cad3d') {
+        updateArchitecturePanel();
+        drawCad3d();
+      }
     }
 
     function setSketchTool(tool, button) {
@@ -882,6 +987,7 @@ def home() -> str:
           material_name: document.getElementById('material').value,
           method_key: document.getElementById('method').value,
           wrap_angle_deg: document.getElementById('angle').value,
+          architecture_mode: document.getElementById('architectureMode').value,
           head_speed_mph: document.getElementById('speed').value,
           gcode_units: document.getElementById('gcodeUnits').value,
           gcode_rapid_feed: document.getElementById('rapidFeed').value,
@@ -927,6 +1033,7 @@ def home() -> str:
 
       document.getElementById('library').textContent = JSON.stringify({
         selected_method: latest.manufacturing_method,
+        selected_architecture: latest.architecture_mode,
         taper_ratios: latest.taper_ratios,
         doe_sweep: latest.doe_sweep,
         ei_profile: latest.ei_profile
@@ -1553,6 +1660,7 @@ ${y2.toFixed(3)}
           head_weight_g: document.getElementById('head').value,
           club_speed_mph: document.getElementById('speed').value,
           wrap_angle_deg: document.getElementById('angle').value,
+          architecture_mode: document.getElementById('architectureMode').value,
           material: document.getElementById('material').value,
           manufacturing_method: document.getElementById('method').value
         },
@@ -1583,6 +1691,7 @@ ${y2.toFixed(3)}
           document.getElementById('head').value = project.inputs.head_weight_g || 205;
           document.getElementById('speed').value = project.inputs.club_speed_mph || 105;
           document.getElementById('angle').value = project.inputs.wrap_angle_deg || 45;
+          if (project.inputs.architecture_mode) document.getElementById('architectureMode').value = project.inputs.architecture_mode;
           document.getElementById('material').value = project.inputs.material || 'Mitsubishi MR70';
           document.getElementById('method').value = project.inputs.manufacturing_method || 'roll_wrapped';
         }
@@ -1599,14 +1708,17 @@ ${y2.toFixed(3)}
     function shaftCadScript() {
       const angle = document.getElementById('angle').value;
       const units = latest ? latest.gcode_settings.units : 'mm';
+      const architecture = selectedArchitecture();
       return `"use strict"
 const jscad = require('@jscad/modeling')
 const { cylinder } = jscad.primitives
 const { colorize } = jscad.colors
 
-// Golf shaft parametric mandrel envelope
+// AE ShaftCAD parametric mandrel envelope
 // Units: ${units}
 // Wrap angle: ${angle} degrees
+// Architecture mode: ${architecture.name}
+// CAD role: ${architecture.cadRole}
 const segments = [
   { name: 'Butt', length: 254, od: 15, id: 13 },
   { name: 'Upper mid', length: 254, od: 13, id: 11 },
@@ -1616,7 +1728,8 @@ const segments = [
 
 function main() {
   // Render service preview uses drawing math.
-  // Next step: generate tapered cone sections for STL/STEP pipeline.
+  // STEP recipe export uses CadQuery/OpenCASCADE for manufacturing geometry.
+  // Shaft-native objects: ${architecture.objects.join(', ')}
   return colorize([0.2, 0.75, 0.66], cylinder({ radius: 7.5, height: 1016 }))
 }
 
@@ -1698,15 +1811,42 @@ method = "${document.getElementById('method').value}"`
       consolePanel.scrollTop = consolePanel.scrollHeight;
     }
 
+    function selectedArchitecture() {
+      const key = document.getElementById('architectureMode')?.value || 'flag_wrap';
+      return { key, ...(ARCHITECTURES[key] || ARCHITECTURES.flag_wrap) };
+    }
+
+    function updateArchitecturePanel() {
+      const architecture = selectedArchitecture();
+      const chip = document.getElementById('cadArchitectureChip');
+      const readout = document.getElementById('architectureReadout');
+      const objects = document.getElementById('architectureObjects');
+      if (chip) chip.textContent = architecture.name;
+      if (readout) {
+        readout.innerHTML = [
+          ['Mode', architecture.name],
+          ['CAD role', architecture.cadRole],
+          ['Exports', architecture.exports.join(', ')],
+          ['Current angle', `${document.getElementById('angle').value} deg`],
+          ['Material', document.getElementById('material').value]
+        ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
+      }
+      if (objects) {
+        objects.innerHTML = architecture.objects.map(item => `<div class="object-token">${item}</div>`).join('');
+      }
+    }
+
     function updateCadInspector() {
       const inspector = document.getElementById('cadInspector');
       if (!inspector) return;
       const material = document.getElementById('material').value;
       const method = document.getElementById('method').value;
       const angle = document.getElementById('angle').value;
+      const architecture = selectedArchitecture();
       const cpm = latest ? latest.overall_cpm.toFixed(1) : '-';
       const rows = [
-        ['Model', 'Golf shaft envelope'],
+        ['Model', 'AE ShaftCAD envelope'],
+        ['Architecture', architecture.name],
         ['Material', material],
         ['Method', method],
         ['Wrap angle', `${angle} deg`],
@@ -1720,10 +1860,75 @@ method = "${document.getElementById('method').value}"`
       inspector.innerHTML = rows.map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
     }
 
+    function shaftRadiusAt(t, butt, tip) {
+      return butt / 2 + (tip / 2 - butt / 2) * t;
+    }
+
+    function drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, phase, color, dash) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash(dash || []);
+      ctx.beginPath();
+      for (let i = 0; i <= 120; i++) {
+        const t = i / 120;
+        const x = shaftX + t * length + 23 * t;
+        const radius = shaftRadiusAt(t, butt, tip);
+        const wave = Math.sin(t * Math.PI * 10 + phase) * radius * 0.48;
+        const y = shaftY + wave + 7 * t;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawArchitectureOverlay(ctx, key, shaftX, shaftY, length, butt, tip, dark) {
+      const primary = dark ? '#f2b84b' : '#a85f00';
+      const secondary = dark ? '#ff7de9' : '#7b2c7e';
+      const cyan = dark ? '#86fff2' : '#087c75';
+      if (key === 'flag_wrap' || key === 'hybrid_flag_helix') {
+        flags.slice(0, 5).forEach((flag, index) => {
+          const t = Math.min(0.92, 0.08 + index * 0.18);
+          const x = shaftX + t * length;
+          const y = shaftY - shaftRadiusAt(t, butt, tip) - 18 - (index % 2) * 18;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate((flag.angle || 0) * Math.PI / 180 * 0.2);
+          ctx.strokeStyle = primary;
+          ctx.fillStyle = 'rgba(242,184,75,0.18)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(0, -8);
+          ctx.lineTo(70, -5);
+          ctx.lineTo(70, 5);
+          ctx.lineTo(0, 8);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        });
+      }
+      if (key === 'helical_wrap' || key === 'hybrid_flag_helix' || key === 'automated_tape') {
+        drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, 0, secondary, []);
+        drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, Math.PI, secondary, key === 'automated_tape' ? [8, 6] : []);
+      }
+      if (key === 'tubular_braid') {
+        for (let phase = 0; phase < Math.PI * 2; phase += Math.PI / 3) {
+          drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, phase, cyan, []);
+          drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, -phase, primary, [7, 5]);
+        }
+      }
+      ctx.fillStyle = dark ? '#d7fff6' : '#17211f';
+      ctx.font = '12px Arial';
+      ctx.fillText(`${selectedArchitecture().name} design objects`, shaftX, shaftY + 88);
+    }
+
     function drawCad3d() {
       const canvas = document.getElementById('cad3dCanvas');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
+      const architecture = selectedArchitecture();
       const dark = document.getElementById('cadDarkMode')?.checked;
       const showAxis = document.getElementById('cadShowAxis')?.checked;
       const showGrid = document.getElementById('cadShowGrid')?.checked;
@@ -1781,9 +1986,11 @@ method = "${document.getElementById('method').value}"`
       ctx.stroke();
       ctx.fillStyle = dark ? '#ffffff' : '#17211f';
       ctx.font = '14px Arial';
-      ctx.fillText('Tapered shaft / mandrel preview', shaftX, shaftY - 52);
+      ctx.fillText(`Tapered shaft / mandrel preview - ${architecture.name}`, shaftX, shaftY - 52);
       ctx.fillText('Butt OD 15 mm', shaftX - 12, shaftY + 62);
       ctx.fillText('Tip OD 7 mm', shaftX + length - 8, shaftY + 48);
+
+      drawArchitectureOverlay(ctx, architecture.key, shaftX, shaftY, length, butt, tip, dark);
 
       ctx.fillStyle = '#d7d7d7';
       ctx.strokeStyle = '#a9a9a9';
@@ -1820,6 +2027,7 @@ method = "${document.getElementById('method').value}"`
 
       const script = document.getElementById('cadScript');
       if (script) script.value = shaftCadScript();
+      updateArchitecturePanel();
       updateCadInspector();
     }
 
@@ -1901,6 +2109,7 @@ def api_analyze(
     material_name: str = "Mitsubishi MR70",
     method_key: str = "roll_wrapped",
     wrap_angle_deg: float = 45.0,
+    architecture_mode: str = "flag_wrap",
     head_speed_mph: float = 105.0,
     gcode_units: str = "mm",
     gcode_rapid_feed: float = 600.0,
@@ -1916,6 +2125,7 @@ def api_analyze(
         material_name=material_name,
         method_key=method_key,
         wrap_angle_deg=wrap_angle_deg,
+        architecture_mode=architecture_mode,
         head_speed_mph=head_speed_mph,
         gcode_units=gcode_units,
         gcode_rapid_feed=gcode_rapid_feed,
@@ -1970,3 +2180,8 @@ def api_materials() -> dict[str, Any]:
 @app.get("/api/manufacturing-methods")
 def api_methods() -> dict[str, Any]:
     return MANUFACTURING_METHODS
+
+
+@app.get("/api/architecture-modes")
+def api_architecture_modes() -> dict[str, Any]:
+    return ARCHITECTURE_MODES
