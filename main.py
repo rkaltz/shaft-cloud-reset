@@ -1080,7 +1080,7 @@ def home() -> str:
         });
         const res = await fetch('/api/analyze?' + params.toString());
         if (!res.ok) throw new Error(`Analyze API failed: ${res.status}`);
-        latest = await res.json();
+        latest = engineeringWithTape(await res.json());
       } catch (error) {
         writeCadConsole(error.message || String(error));
         return;
@@ -1092,7 +1092,7 @@ def home() -> str:
       document.getElementById('torsion').textContent = latest.torsion_deflection_deg_15nm.toFixed(1) + ' deg';
 
       document.getElementById('zones').innerHTML = latest.zone_profile.map(
-        z => `<tr><td>${z.station_in}"</td><td>${z.cpm.toFixed(1)}</td></tr>`
+        z => `<tr><td>${z.station_in}"</td><td>${z.cpm.toFixed(1)} <small>+${(z.tape_boost || 0).toFixed(1)}</small></td></tr>`
       ).join('');
 
       const launch = latest.launch_simulation;
@@ -1109,13 +1109,17 @@ def home() -> str:
         ['Natural Frequency', latest.natural_frequency_hz.toFixed(2) + ' Hz'],
         ['Fatigue Cycles', latest.fatigue_cycles_estimate.toExponential(2)],
         ['Material Cost', '$' + latest.material_cost_usd.toFixed(2)],
-        ['Best Wrap Angle', latest.wrapping_angle_optimization.best.angle_deg + ' deg']
+        ['Best Wrap Angle', latest.wrapping_angle_optimization.best.angle_deg + ' deg'],
+        ['TapeCAD Mass Added', latest.tape_engineering.estimated_mass_g.toFixed(2) + ' g'],
+        ['TapeCAD CPM Boost', '+' + latest.tape_engineering.estimated_cpm_boost.toFixed(1)],
+        ['TapeCAD Torque Reduction', '-' + latest.tape_engineering.estimated_torque_reduction_deg.toFixed(2) + ' deg']
       ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
 
       document.getElementById('library').textContent = JSON.stringify({
         selected_method: latest.manufacturing_method,
         selected_architecture: latest.architecture_mode,
         taper_ratios: latest.taper_ratios,
+        tape_engineering: latest.tape_engineering,
         doe_sweep: latest.doe_sweep,
         ei_profile: latest.ei_profile
       }, null, 2);
@@ -1755,6 +1759,135 @@ ${y2.toFixed(3)}
       }, 0);
     }
 
+    function tapeStiffnessIndexAtStation(stationIn) {
+      return tapes.reduce((sum, tape) => {
+        const tapeStart = Number(tape.startIn);
+        const tapeEnd = tapeStart - Number(tape.length) / 25.4;
+        const inZone = stationIn <= tapeStart && stationIn >= tapeEnd;
+        if (!inZone) return sum;
+        const angle = Math.abs(Number(tape.angle));
+        const directional = angle === 0 ? 1.0 : angle === 90 ? 0.2 : angle === 0 ? 1.0 : 0.55;
+        return sum + (Number(tape.width) * Number(tape.thickness) / 10) * directional;
+      }, 0);
+    }
+
+    function tapeAdjustedZoneProfile(baseProfile) {
+      return baseProfile.map(zone => {
+        const localBoost = tapeStiffnessIndexAtStation(Number(zone.station_in));
+        return {
+          ...zone,
+          base_cpm: zone.cpm,
+          tape_boost: localBoost,
+          cpm: zone.cpm + localBoost
+        };
+      });
+    }
+
+    function engineeringWithTape(base) {
+      if (!base) return null;
+      const massAdded = tapeMassGrams();
+      const cpmBoost = tapeCpmBoost();
+      const torqueReduction = tapeTorqueReduction();
+      const zones = tapeAdjustedZoneProfile(base.zone_profile);
+      const adjustedCpm = base.overall_cpm + cpmBoost;
+      const adjustedTorsion = Math.max(0.2, base.torsion_deflection_deg_15nm - torqueReduction);
+      const stiffnessRatio = Math.max(0.1, adjustedCpm / Math.max(base.overall_cpm, 1));
+      const headSpeed = Number(document.getElementById('speed').value);
+      const stiffnessDelta = adjustedCpm - 255;
+      const adjustedBallSpeed = headSpeed * 1.45 + stiffnessDelta * 0.04;
+      const adjustedLaunch = 13.5 - stiffnessDelta * 0.018;
+      const adjustedSpin = 2650 - stiffnessDelta * 8.5;
+      const adjustedCarry = adjustedBallSpeed * 1.68 + adjustedLaunch * 2.0 - adjustedSpin / 180.0;
+      return {
+        ...base,
+        base_overall_cpm: base.overall_cpm,
+        base_mass_g: base.mass_g,
+        base_torsion_deflection_deg_15nm: base.torsion_deflection_deg_15nm,
+        base_zone_profile: base.zone_profile,
+        overall_cpm: adjustedCpm,
+        cpm_error: adjustedCpm - Number(document.getElementById('target').value),
+        mass_g: base.mass_g + massAdded,
+        torsion_deflection_deg_15nm: adjustedTorsion,
+        tip_deflection_mm_100n: base.tip_deflection_mm_100n / stiffnessRatio,
+        natural_frequency_hz: base.natural_frequency_hz * Math.sqrt(stiffnessRatio),
+        launch_simulation: {
+          club_speed_mph: headSpeed,
+          ball_speed_mph: adjustedBallSpeed,
+          launch_angle_deg: adjustedLaunch,
+          spin_rpm: adjustedSpin,
+          carry_yards: adjustedCarry
+        },
+        zone_profile: zones,
+        tape_engineering: {
+          tape_count: tapes.length,
+          estimated_mass_g: massAdded,
+          estimated_cpm_boost: cpmBoost,
+          estimated_torque_reduction_deg: torqueReduction,
+          zone_boosts: zones.map(z => ({station_in: z.station_in, tape_boost: z.tape_boost})),
+          tapes
+        }
+      };
+    }
+
+    function refreshTapeEngineering() {
+      if (!latest) return;
+      latest = engineeringWithTape({
+        ...latest,
+        overall_cpm: latest.base_overall_cpm || latest.overall_cpm,
+        mass_g: latest.base_mass_g || latest.mass_g,
+        torsion_deflection_deg_15nm: latest.base_torsion_deflection_deg_15nm || latest.torsion_deflection_deg_15nm,
+        zone_profile: latest.base_zone_profile || latest.zone_profile
+      });
+      updateSimulationFromLatest();
+    }
+
+    function updateSimulationFromLatest() {
+      if (!latest) return;
+      document.getElementById('cpm').textContent = latest.overall_cpm.toFixed(1);
+      document.getElementById('error').textContent = latest.cpm_error.toFixed(1);
+      document.getElementById('mass').textContent = latest.mass_g.toFixed(1) + ' g';
+      document.getElementById('torsion').textContent = latest.torsion_deflection_deg_15nm.toFixed(1) + ' deg';
+
+      document.getElementById('zones').innerHTML = latest.zone_profile.map(
+        z => `<tr><td>${z.station_in}"</td><td>${z.cpm.toFixed(1)} <small>+${(z.tape_boost || 0).toFixed(1)}</small></td></tr>`
+      ).join('');
+
+      const launch = latest.launch_simulation;
+      document.getElementById('launch').innerHTML = [
+        ['Club Speed', launch.club_speed_mph.toFixed(1) + ' mph'],
+        ['Ball Speed', launch.ball_speed_mph.toFixed(1) + ' mph'],
+        ['Launch Angle', launch.launch_angle_deg.toFixed(1) + ' deg'],
+        ['Spin', launch.spin_rpm.toFixed(0) + ' rpm'],
+        ['Carry', launch.carry_yards.toFixed(1) + ' yd']
+      ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+
+      document.getElementById('analytics').innerHTML = [
+        ['Tip Deflection @100N', latest.tip_deflection_mm_100n.toFixed(1) + ' mm'],
+        ['Natural Frequency', latest.natural_frequency_hz.toFixed(2) + ' Hz'],
+        ['Fatigue Cycles', latest.fatigue_cycles_estimate.toExponential(2)],
+        ['Material Cost', '$' + latest.material_cost_usd.toFixed(2)],
+        ['Best Wrap Angle', latest.wrapping_angle_optimization.best.angle_deg + ' deg'],
+        ['TapeCAD Mass Added', latest.tape_engineering.estimated_mass_g.toFixed(2) + ' g'],
+        ['TapeCAD CPM Boost', '+' + latest.tape_engineering.estimated_cpm_boost.toFixed(1)],
+        ['TapeCAD Torque Reduction', '-' + latest.tape_engineering.estimated_torque_reduction_deg.toFixed(2) + ' deg']
+      ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+
+      document.getElementById('library').textContent = JSON.stringify({
+        selected_method: latest.manufacturing_method,
+        selected_architecture: latest.architecture_mode,
+        taper_ratios: latest.taper_ratios,
+        tape_engineering: latest.tape_engineering,
+        doe_sweep: latest.doe_sweep,
+        ei_profile: latest.ei_profile
+      }, null, 2);
+      document.getElementById('gcode').textContent = latest.gcode;
+
+      drawChart(latest.zone_profile);
+      drawDesign(latest);
+      renderTapeCad();
+      drawCad3d();
+    }
+
     function renderTapeCad() {
       renderTapeTable();
       drawTapeCad();
@@ -1788,6 +1921,7 @@ ${y2.toFixed(3)}
         layer: document.getElementById(`tapeLayer${index}`).value
       };
       drawTapeCad();
+      refreshTapeEngineering();
       drawCad3d();
     }
 
@@ -1795,6 +1929,7 @@ ${y2.toFixed(3)}
       flashButton(button, 'Added');
       tapes.push({name: 'New UD tape strip', startIn: 31, length: 200, width: 10, thickness: 0.125, angle: 0, layer: 'between braid layers'});
       renderTapeCad();
+      refreshTapeEngineering();
       drawCad3d();
     }
 
@@ -1803,6 +1938,7 @@ ${y2.toFixed(3)}
       tapes.push({name: 'Bias +45 tape', startIn: 21, length: 190, width: 10, thickness: 0.125, angle: 45, layer: 'torque pair'});
       tapes.push({name: 'Bias -45 tape', startIn: 21, length: 190, width: 10, thickness: 0.125, angle: -45, layer: 'torque pair'});
       renderTapeCad();
+      refreshTapeEngineering();
       drawCad3d();
     }
 
@@ -1810,6 +1946,7 @@ ${y2.toFixed(3)}
       flashButton(button, 'Deleted');
       tapes.splice(index, 1);
       renderTapeCad();
+      refreshTapeEngineering();
       drawCad3d();
     }
 
@@ -1817,6 +1954,7 @@ ${y2.toFixed(3)}
       flashButton(button, 'Reset');
       tapes = defaultTapes();
       renderTapeCad();
+      refreshTapeEngineering();
       drawCad3d();
     }
 
