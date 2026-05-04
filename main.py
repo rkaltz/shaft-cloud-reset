@@ -431,6 +431,8 @@ def home() -> str:
     .inspector-panel table { font-size: 12px; }
     .console-panel { grid-column: 1 / 4; background: #151b1a; color: #d7fff6; border-radius: 6px; padding: 10px; overflow: auto; font-family: Consolas, monospace; font-size: 13px; }
     .export-row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-top: 8px; }
+    .fit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .fit-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
     .cad-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
     .cad-chip { background: #17211f; color: #d7fff6; padding: 10px; border-radius: 6px; font-size: 13px; }
     .cad-chip strong { display: block; color: white; font-size: 18px; margin-top: 4px; }
@@ -530,6 +532,7 @@ def home() -> str:
         <div class="workspace-title">Engineering Workspace</div>
         <div class="tabs">
           <button class="tab active" id="simTab" onclick="showView('simulation')">Simulation</button>
+          <button class="tab" id="fitTab" onclick="showView('fit')">Fit-to-Build</button>
           <button class="tab" id="drawTab" onclick="showView('drawing')">Design / Drawing</button>
           <button class="tab" id="flagTab" onclick="showView('flags')">Flag CAD</button>
           <button class="tab" id="cad3dTab" onclick="showView('cad3d')">3D CAD</button>
@@ -559,6 +562,41 @@ def home() -> str:
         <pre id="library"></pre>
         <h3>Mandrel / Taper G-Code</h3>
         <pre id="gcode"></pre>
+      </div>
+      <div id="fitView" class="view hidden">
+        <div class="cad-strip">
+          <div class="cad-chip">Workflow<strong>Swing to Shaft</strong></div>
+          <div class="cad-chip">Output<strong>Target Profile</strong></div>
+          <div class="cad-chip">CAD Link<strong>Apply Build</strong></div>
+          <div class="cad-chip">Mode<strong>Prototype</strong></div>
+        </div>
+        <h3>Fit-to-Build Swing Inputs</h3>
+        <div class="fit-grid">
+          <div><label>Club Speed (mph)</label><input id="fitSpeed" type="number" value="105" step="1"></div>
+          <div><label>Tempo</label><select id="fitTempo"><option>Smooth</option><option selected>Medium</option><option>Aggressive</option></select></div>
+          <div><label>Transition</label><select id="fitTransition"><option>Smooth</option><option selected>Medium</option><option>Hard</option></select></div>
+          <div><label>Release Timing</label><select id="fitRelease"><option>Early</option><option selected>Mid</option><option>Late</option></select></div>
+          <div><label>Current Launch (deg)</label><input id="fitLaunch" type="number" value="13.5" step="0.1"></div>
+          <div><label>Current Spin (rpm)</label><input id="fitSpin" type="number" value="2650" step="10"></div>
+          <div><label>Miss Pattern</label><select id="fitMiss"><option>Left</option><option selected>Neutral</option><option>Right</option><option>High spin</option><option>Low launch</option></select></div>
+          <div><label>Feel Goal</label><select id="fitFeel"><option>Softer load</option><option selected>Stable mid</option><option>Boardy/stout</option></select></div>
+          <div><label>Target Weight (g)</label><input id="fitWeight" type="number" value="65" step="1"></div>
+        </div>
+        <div class="fit-actions">
+          <button onclick="runFitToBuild(this)">Generate Shaft Target</button>
+          <button class="secondary" onclick="applyFitToCad(this)">Apply to CAD</button>
+          <button class="secondary" onclick="downloadFitProfile(this)">Export Fit Profile</button>
+        </div>
+        <div class="grid2">
+          <div>
+            <h3>Target Shaft Profile</h3>
+            <table><tbody id="fitProfile"></tbody></table>
+          </div>
+          <div>
+            <h3>Build Recommendation</h3>
+            <pre id="fitBuild"></pre>
+          </div>
+        </div>
       </div>
       <div id="drawingView" class="view hidden">
         <div class="cad-strip">
@@ -711,6 +749,7 @@ def home() -> str:
     let activeDrag = null;
     let selectedFlagIndex = null;
     let sketchTool = 'select';
+    let latestFitProfile = null;
 
     function defaultFlags() {
       return [
@@ -723,18 +762,22 @@ def home() -> str:
 
     function showView(viewName) {
       const simulation = document.getElementById('simulationView');
+      const fitView = document.getElementById('fitView');
       const drawing = document.getElementById('drawingView');
       const flagView = document.getElementById('flagView');
       const cad3dView = document.getElementById('cad3dView');
       const simTab = document.getElementById('simTab');
+      const fitTab = document.getElementById('fitTab');
       const drawTab = document.getElementById('drawTab');
       const flagTab = document.getElementById('flagTab');
       const cad3dTab = document.getElementById('cad3dTab');
       simulation.classList.toggle('hidden', viewName !== 'simulation');
+      fitView.classList.toggle('hidden', viewName !== 'fit');
       drawing.classList.toggle('hidden', viewName !== 'drawing');
       flagView.classList.toggle('hidden', viewName !== 'flags');
       cad3dView.classList.toggle('hidden', viewName !== 'cad3d');
       simTab.classList.toggle('active', viewName === 'simulation');
+      fitTab.classList.toggle('active', viewName === 'fit');
       drawTab.classList.toggle('active', viewName === 'drawing');
       flagTab.classList.toggle('active', viewName === 'flags');
       cad3dTab.classList.toggle('active', viewName === 'cad3d');
@@ -850,6 +893,110 @@ def home() -> str:
         ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
         ctx.fillText(p.station_in + '"', x - 10, canvas.height - 10);
       });
+    }
+
+    function fitMultiplier(value, mapping) {
+      return mapping[value] || 0;
+    }
+
+    function runFitToBuild(button) {
+      flashButton(button, 'Generated');
+      const speed = Number(document.getElementById('fitSpeed').value);
+      const launch = Number(document.getElementById('fitLaunch').value);
+      const spin = Number(document.getElementById('fitSpin').value);
+      const weight = Number(document.getElementById('fitWeight').value);
+      const tempo = document.getElementById('fitTempo').value;
+      const transition = document.getElementById('fitTransition').value;
+      const release = document.getElementById('fitRelease').value;
+      const miss = document.getElementById('fitMiss').value;
+      const feel = document.getElementById('fitFeel').value;
+
+      let targetCpm = 235 + speed * 0.22;
+      targetCpm += fitMultiplier(tempo, {Smooth: -4, Medium: 0, Aggressive: 5});
+      targetCpm += fitMultiplier(transition, {Smooth: -3, Medium: 0, Hard: 6});
+      targetCpm += fitMultiplier(release, {Early: -3, Mid: 0, Late: 4});
+      targetCpm += fitMultiplier(feel, {'Softer load': -5, 'Stable mid': 0, 'Boardy/stout': 6});
+      if (miss === 'Left') targetCpm += 3;
+      if (miss === 'Right') targetCpm -= 2;
+      if (miss === 'High spin') targetCpm += 4;
+      if (miss === 'Low launch') targetCpm -= 4;
+
+      const torqueTarget = Math.max(2.4, 4.2 - (targetCpm - 250) * 0.025 - fitMultiplier(transition, {Hard: 0.35}));
+      const launchBias = launch > 15 || spin > 3000 ? 'lower launch / lower spin' : launch < 11 ? 'add launch / smoother tip' : 'neutral launch';
+      const wrapAngle = Math.max(28, Math.min(58, 45 + (transition === 'Hard' ? 5 : 0) + (miss === 'Left' ? 4 : 0) - (feel === 'Softer load' ? 5 : 0)));
+      const tipBias = launchBias.includes('lower') ? 'stiffen tip section with bias/hoop support' : launchBias.includes('add') ? 'soften tip section and reduce hoop density' : 'balanced tip stiffness';
+      const profile = [
+        {station: 41, cpm: targetCpm - 18},
+        {station: 36, cpm: targetCpm - 10},
+        {station: 31, cpm: targetCpm - 3},
+        {station: 26, cpm: targetCpm + 2},
+        {station: 21, cpm: targetCpm + 8},
+        {station: 16, cpm: targetCpm + 15},
+        {station: 11, cpm: targetCpm + 24}
+      ];
+
+      latestFitProfile = {
+        target_cpm: targetCpm,
+        target_weight_g: weight,
+        torque_target_deg: torqueTarget,
+        wrap_angle_deg: wrapAngle,
+        launch_bias: launchBias,
+        tip_strategy: tipBias,
+        zone_profile: profile,
+        inputs: {speed, launch, spin, weight, tempo, transition, release, miss, feel}
+      };
+
+      document.getElementById('fitProfile').innerHTML = [
+        ['Target Overall CPM', targetCpm.toFixed(1)],
+        ['Target Weight', weight.toFixed(0) + ' g'],
+        ['Torque Target', torqueTarget.toFixed(2) + ' deg'],
+        ['Wrap Angle', wrapAngle.toFixed(0) + ' deg'],
+        ['Launch Bias', launchBias],
+        ['Tip Strategy', tipBias]
+      ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
+
+      document.getElementById('fitBuild').textContent = JSON.stringify({
+        shaft_target: latestFitProfile,
+        cad_translation: {
+          set_target_cpm: targetCpm,
+          set_wrap_angle: wrapAngle,
+          flags: [
+            '0deg axial butt/mid stability flag',
+            `${wrapAngle.toFixed(0)}deg bias flag pair for torque control`,
+            tipBias,
+            'optional hoop/helix layer if torque target is not met'
+          ]
+        }
+      }, null, 2);
+    }
+
+    function applyFitToCad(button) {
+      if (!latestFitProfile) runFitToBuild(button);
+      flashButton(button, 'Applied');
+      document.getElementById('target').value = latestFitProfile.target_cpm.toFixed(1);
+      document.getElementById('angle').value = latestFitProfile.wrap_angle_deg.toFixed(0);
+      document.getElementById('speed').value = latestFitProfile.inputs.speed;
+      flags = [
+        {name: 'Fit axial butt', length: 430, root: 94, tip: 78, angle: 0, station: 'Butt', layer: 'axial', locked: false},
+        {name: 'Fit bias +', length: 370, root: 80, tip: 52, angle: latestFitProfile.wrap_angle_deg, station: 'Mid', layer: 'bias', locked: false},
+        {name: 'Fit bias -', length: 370, root: 80, tip: 52, angle: -latestFitProfile.wrap_angle_deg, station: 'Mid', layer: 'bias', locked: false},
+        {name: 'Fit tip tune', length: 300, root: 58, tip: latestFitProfile.launch_bias.includes('lower') ? 42 : 30, angle: 0, station: 'Tip', layer: 'tip', locked: false}
+      ];
+      renderFlagEditor();
+      run();
+      writeCadConsole('Applied Fit-to-Build target to CAD model.');
+    }
+
+    function downloadFitProfile(button) {
+      if (!latestFitProfile) runFitToBuild(button);
+      flashButton(button, 'Exported');
+      const blob = new Blob([JSON.stringify(latestFitProfile, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-fit-to-build-profile.json';
+      a.click();
+      URL.revokeObjectURL(url);
     }
 
     function drawDesign(data) {
