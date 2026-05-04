@@ -416,12 +416,38 @@ def home() -> str:
     th { color: #50615e; font-size: 13px; }
     canvas { width: 100%; height: 230px; border: 1px solid #cbd8d5; border-radius: 6px; margin-top: 10px; background: white; }
     .drawing-canvas { height: 420px; background: #101918; border-color: #344642; }
-    .flag-canvas { height: 520px; background: #101918; border-color: #344642; }
+    .flag-canvas { height: 520px; background: #101918; border-color: #344642; cursor: crosshair; }
+    .viewer-canvas { height: 520px; background: #f7f8fb; border-color: #cbd8d5; }
+    .cad-split { display: grid; grid-template-columns: 240px 1fr 360px; gap: 12px; }
+    .viewer-panel { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; }
+    .viewer-panel h3 { margin: 6px 0 8px; border-bottom: 1px solid #17211f; padding-bottom: 4px; }
+    .viewer-panel label { display: flex; justify-content: space-between; align-items: center; margin: 7px 0; font-weight: 400; }
+    .viewer-panel input { width: auto; }
+    .link-list button { display: block; width: 100%; text-align: left; background: transparent; color: #005bd1; padding: 3px 0; margin: 0; font-weight: 400; }
+    .code-panel textarea { width: 100%; height: 520px; box-sizing: border-box; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; font-family: Consolas, monospace; font-size: 13px; line-height: 1.45; color: #8a005f; background: #fff; }
+    .export-row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-top: 8px; }
     .cad-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
     .cad-chip { background: #17211f; color: #d7fff6; padding: 10px; border-radius: 6px; font-size: 13px; }
     .cad-chip strong { display: block; color: white; font-size: 18px; margin-top: 4px; }
-    .tool-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+    .tool-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 10px 0; }
     .tool-row button { margin-top: 0; }
+    .cad-toolbar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; margin: 10px 0; }
+    .cad-tool { background: #243532; color: #d7fff6; border: 1px solid #45615b; padding: 8px; margin: 0; }
+    .cad-tool.active { background: #6d2d76; color: white; }
+    .sketch-shell { display: grid; grid-template-columns: 72px 1fr 300px; gap: 0; border: 1px solid #344642; background: #050808; }
+    .sketch-menu { grid-column: 1 / 4; background: #202020; color: white; padding: 7px 10px; font-family: Georgia, serif; font-weight: 700; }
+    .sketch-menu span { margin-right: 18px; }
+    .sketch-tools { background: #222; padding: 8px; display: grid; gap: 6px; align-content: start; }
+    .sketch-icon { background: #151515; color: #15d61f; border: 1px solid #333; padding: 7px 4px; margin: 0; font-size: 15px; min-height: 32px; }
+    .sketch-icon.purple { color: #ff34ff; }
+    .sketch-icon.active { outline: 2px solid #d7fff6; }
+    .sketch-side { background: #050808; color: #19c8ff; border-left: 1px solid #202020; padding: 12px; font-family: Consolas, monospace; }
+    .sketch-side h3 { color: #f2b84b; margin: 8px 0; font-size: 16px; }
+    .group-row { display: grid; grid-template-columns: 32px 44px 1fr; gap: 8px; padding: 5px; background: #161616; margin: 4px 0; }
+    .ok { color: #00ff41; }
+    .sketch-options { display: flex; gap: 14px; align-items: center; margin: 10px 0; font-size: 13px; }
+    .sketch-options label { display: flex; gap: 6px; align-items: center; margin: 0; font-weight: 700; }
+    .sketch-options input { width: auto; margin: 0; }
     .editable-table input { margin: 0; padding: 6px; font-size: 13px; }
     .editable-table button { margin: 0; padding: 6px; }
     pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; max-height: 300px; overflow: auto; }
@@ -500,6 +526,7 @@ def home() -> str:
           <button class="tab active" id="simTab" onclick="showView('simulation')">Simulation</button>
           <button class="tab" id="drawTab" onclick="showView('drawing')">Design / Drawing</button>
           <button class="tab" id="flagTab" onclick="showView('flags')">Flag CAD</button>
+          <button class="tab" id="cad3dTab" onclick="showView('cad3d')">3D CAD</button>
         </div>
       </div>
       <div id="simulationView" class="view">
@@ -554,10 +581,43 @@ def home() -> str:
           <div class="cad-chip">Longest Flag<strong id="flagLongest">-</strong></div>
           <div class="cad-chip">Export<strong>SVG</strong></div>
         </div>
-        <h3>Prepreg Flag Drawing Board</h3>
-        <canvas class="flag-canvas" id="flagCanvas" width="1200" height="520"></canvas>
+        <h3>Prepreg Flag Constraint Sketcher</h3>
+        <div class="sketch-shell">
+          <div class="sketch-menu">
+            <span>File</span><span>Edit</span><span>View</span><span>New Group</span><span>Sketch</span><span>Constrain</span><span>Analyze</span><span>Help</span>
+          </div>
+          <div class="sketch-tools">
+            <button class="sketch-icon active" onclick="setSketchTool('select', this)">SEL</button>
+            <button class="sketch-icon" onclick="setSketchTool('line', this)">LN</button>
+            <button class="sketch-icon" onclick="setSketchTool('point', this)">PT</button>
+            <button class="sketch-icon purple" onclick="setSketchTool('dimension', this)">DIM</button>
+            <button class="sketch-icon purple" onclick="setSketchTool('horizontal', this)">H</button>
+            <button class="sketch-icon purple" onclick="setSketchTool('vertical', this)">V</button>
+            <button class="sketch-icon purple" onclick="setSketchTool('angle', this)">ANG</button>
+            <button class="sketch-icon" onclick="setSketchTool('construction', this)">REF</button>
+          </div>
+          <canvas class="flag-canvas" id="flagCanvas" width="1020" height="520"
+            onmousedown="flagMouseDown(event)" onmousemove="flagMouseMove(event)" onmouseup="flagMouseUp()" onmouseleave="flagMouseUp()"></canvas>
+          <div class="sketch-side">
+            <div>home &nbsp; in plane: <span class="ok">g002-sketch-in-plane</span></div>
+            <h3>active</h3>
+            <div class="group-row"><span></span><span>shown</span><span>dof&nbsp;&nbsp;group-name</span></div>
+            <div class="group-row"><span>◎</span><span>☑</span><span><span class="ok">ok</span>&nbsp;&nbsp;g001-references</span></div>
+            <div class="group-row"><span>⊙</span><span>☑</span><span><span class="ok">ok</span>&nbsp;&nbsp;g002-sketch-in-plane</span></div>
+            <h3>constraints</h3>
+            <div id="constraintReadout">H: 0 | V: 0 | DIM: 0</div>
+            <h3>selection</h3>
+            <div id="sideSelection">No flag selected</div>
+          </div>
+        </div>
+        <div class="sketch-options">
+          <label><input id="snapGrid" type="checkbox" checked onchange="drawFlags()"> Snap to 5 mm grid</label>
+          <label><input id="lockAngle" type="checkbox"> Lock fiber angle while dragging</label>
+          <span id="selectedFlagLabel">No flag selected</span>
+        </div>
         <div class="tool-row">
           <button onclick="addFlag(this)">Add Flag</button>
+          <button onclick="addTriangleFlag(this)">Add Triangle</button>
           <button class="secondary" onclick="resetFlags(this)">Reset Flags</button>
           <button class="secondary" onclick="downloadFlagJson(this)">Export Flag JSON</button>
           <button class="secondary" onclick="downloadFlagSvg(this)">Export Flag SVG</button>
@@ -578,11 +638,60 @@ def home() -> str:
           <tbody id="flagRows"></tbody>
         </table>
       </div>
+      <div id="cad3dView" class="view hidden">
+        <div class="cad-strip">
+          <div class="cad-chip">Model<strong>Shaft</strong></div>
+          <div class="cad-chip">Kernel<strong>JSCAD-style</strong></div>
+          <div class="cad-chip">Export<strong>Script</strong></div>
+          <div class="cad-chip">View<strong>Grid</strong></div>
+        </div>
+        <h3>Parametric 3D Shaft / Mandrel Preview</h3>
+        <div class="cad-split">
+          <div class="viewer-panel">
+            <h3>Options</h3>
+            <label>Dark Mode <input id="cadDarkMode" type="checkbox" onchange="drawCad3d()"></label>
+            <label>Show Axis <input id="cadShowAxis" type="checkbox" checked onchange="drawCad3d()"></label>
+            <label>Show Grid <input id="cadShowGrid" type="checkbox" checked onchange="drawCad3d()"></label>
+            <label>Smooth Render <input id="cadSmooth" type="checkbox" onchange="drawCad3d()"></label>
+            <label>Zoom To Fit <input id="cadZoomFit" type="checkbox" onchange="drawCad3d()"></label>
+            <h3>Documentation</h3>
+            <div class="link-list">
+              <button onclick="loadCadExample('shaft')">Shaft Envelope</button>
+              <button onclick="loadCadExample('mandrel')">Mandrel Core</button>
+              <button onclick="loadCadExample('flags')">Flag Wrap Layout</button>
+              <button onclick="loadCadExample('imports')">Import SVG / STL plan</button>
+            </div>
+            <h3>Examples</h3>
+            <div class="link-list">
+              <button onclick="loadCadExample('extrusion')">Extrusions</button>
+              <button onclick="loadCadExample('hollow')">Hollow Operations</button>
+              <button onclick="loadCadExample('parametric')">Parameter Types</button>
+            </div>
+          </div>
+          <div>
+            <canvas class="viewer-canvas" id="cad3dCanvas" width="900" height="520"></canvas>
+            <div class="export-row">
+              <select id="cadExportType">
+                <option>JSCAD script</option>
+                <option>STEP recipe</option>
+              </select>
+              <button onclick="downloadCadScript(this)">Export</button>
+            </div>
+          </div>
+          <div class="code-panel">
+            <textarea id="cadScript" spellcheck="false"></textarea>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
   <script>
     let latest = null;
     let flags = defaultFlags();
+    let flagGeometry = [];
+    let activeDrag = null;
+    let selectedFlagIndex = null;
+    let sketchTool = 'select';
 
     function defaultFlags() {
       return [
@@ -597,17 +706,29 @@ def home() -> str:
       const simulation = document.getElementById('simulationView');
       const drawing = document.getElementById('drawingView');
       const flagView = document.getElementById('flagView');
+      const cad3dView = document.getElementById('cad3dView');
       const simTab = document.getElementById('simTab');
       const drawTab = document.getElementById('drawTab');
       const flagTab = document.getElementById('flagTab');
+      const cad3dTab = document.getElementById('cad3dTab');
       simulation.classList.toggle('hidden', viewName !== 'simulation');
       drawing.classList.toggle('hidden', viewName !== 'drawing');
       flagView.classList.toggle('hidden', viewName !== 'flags');
+      cad3dView.classList.toggle('hidden', viewName !== 'cad3d');
       simTab.classList.toggle('active', viewName === 'simulation');
       drawTab.classList.toggle('active', viewName === 'drawing');
       flagTab.classList.toggle('active', viewName === 'flags');
+      cad3dTab.classList.toggle('active', viewName === 'cad3d');
       if (viewName === 'drawing' && latest) drawDesign(latest);
       if (viewName === 'flags') renderFlagEditor();
+      if (viewName === 'cad3d') drawCad3d();
+    }
+
+    function setSketchTool(tool, button) {
+      sketchTool = tool;
+      document.querySelectorAll('.cad-tool, .sketch-icon').forEach(item => item.classList.remove('active'));
+      if (button) button.classList.add('active');
+      drawFlags();
     }
 
     function flashButton(button, label) {
@@ -678,6 +799,7 @@ def home() -> str:
       drawChart(latest.zone_profile);
       drawDesign(latest);
       renderFlagEditor();
+      drawCad3d();
     }
 
     function drawChart(profile) {
@@ -799,16 +921,29 @@ def home() -> str:
     function renderFlagEditor() {
       document.getElementById('flagRows').innerHTML = flags.map((flag, index) => `
         <tr>
-          <td><input value="${flag.name}" onchange="updateFlag(${index}, 'name', this.value)"></td>
-          <td><input type="number" value="${flag.length}" step="1" onchange="updateFlag(${index}, 'length', this.value)"></td>
-          <td><input type="number" value="${flag.root}" step="1" onchange="updateFlag(${index}, 'root', this.value)"></td>
-          <td><input type="number" value="${flag.tip}" step="1" onchange="updateFlag(${index}, 'tip', this.value)"></td>
-          <td><input type="number" value="${flag.angle}" step="1" onchange="updateFlag(${index}, 'angle', this.value)"></td>
-          <td><input value="${flag.station}" onchange="updateFlag(${index}, 'station', this.value)"></td>
+          <td><input id="flagName${index}" value="${flag.name}" onchange="updateFlag(${index}, 'name', this.value)"></td>
+          <td><input id="flagLength${index}" type="number" value="${flag.length}" step="1" onchange="updateFlag(${index}, 'length', this.value)"></td>
+          <td><input id="flagRoot${index}" type="number" value="${flag.root}" step="1" onchange="updateFlag(${index}, 'root', this.value)"></td>
+          <td><input id="flagTip${index}" type="number" value="${flag.tip}" step="1" onchange="updateFlag(${index}, 'tip', this.value)"></td>
+          <td><input id="flagAngle${index}" type="number" value="${flag.angle}" step="1" onchange="updateFlag(${index}, 'angle', this.value)"></td>
+          <td><input id="flagStation${index}" value="${flag.station}" onchange="updateFlag(${index}, 'station', this.value)"></td>
           <td><button class="secondary" onclick="deleteFlag(${index}, this)">Delete</button></td>
         </tr>
       `).join('');
       drawFlags();
+    }
+
+    function updateFlagTableValues() {
+      flags.forEach((flag, index) => {
+        const length = document.getElementById(`flagLength${index}`);
+        const root = document.getElementById(`flagRoot${index}`);
+        const tip = document.getElementById(`flagTip${index}`);
+        const angle = document.getElementById(`flagAngle${index}`);
+        if (length) length.value = Math.round(flag.length);
+        if (root) root.value = Math.round(flag.root);
+        if (tip) tip.value = Math.round(flag.tip);
+        if (angle) angle.value = Math.round(flag.angle);
+      });
     }
 
     function updateFlag(index, key, value) {
@@ -823,6 +958,12 @@ def home() -> str:
     function addFlag(button) {
       flashButton(button, 'Added');
       flags.push({name: 'New flag', length: 320, root: 70, tip: 48, angle: 0, station: 'Custom'});
+      renderFlagEditor();
+    }
+
+    function addTriangleFlag(button) {
+      flashButton(button, 'Added');
+      flags.push({name: 'Triangle bias flag', length: 340, root: 76, tip: 4, angle: 45, station: 'Custom'});
       renderFlagEditor();
     }
 
@@ -850,14 +991,95 @@ def home() -> str:
       ];
     }
 
+    function canvasPoint(event) {
+      const canvas = document.getElementById('flagCanvas');
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * canvas.width / rect.width,
+        y: (event.clientY - rect.top) * canvas.height / rect.height
+      };
+    }
+
+    function distance(a, b) {
+      return Math.hypot(a.x - b[0], a.y - b[1]);
+    }
+
+    function snapValue(value) {
+      const snap = document.getElementById('snapGrid');
+      return snap && snap.checked ? Math.round(value / 5) * 5 : value;
+    }
+
+    function flagMouseDown(event) {
+      const point = canvasPoint(event);
+      let best = null;
+      flagGeometry.forEach((geometry, flagIndex) => {
+        geometry.points.forEach((cornerPoint, cornerIndex) => {
+          const d = distance(point, cornerPoint);
+          if (d < 14 && (!best || d < best.distance)) {
+            best = {flagIndex, cornerIndex, distance: d};
+          }
+        });
+      });
+      if (best) {
+        selectedFlagIndex = best.flagIndex;
+        activeDrag = best;
+        drawFlags();
+        return;
+      }
+      selectedFlagIndex = null;
+      activeDrag = null;
+      drawFlags();
+    }
+
+    function flagMouseMove(event) {
+      if (!activeDrag) return;
+      const point = canvasPoint(event);
+      const geometry = flagGeometry[activeDrag.flagIndex];
+      if (!geometry) return;
+      const flag = flags[activeDrag.flagIndex];
+      const localX = Math.max(40, point.x - geometry.x);
+      const localY = Math.abs(point.y - geometry.y);
+      if (activeDrag.cornerIndex === 1 || activeDrag.cornerIndex === 2) {
+        flag.length = Math.max(60, snapValue(localX / geometry.scale));
+        flag.tip = Math.max(8, snapValue((localY * 2) / geometry.scale));
+      } else {
+        flag.root = Math.max(8, snapValue((localY * 2) / geometry.scale));
+      }
+      if (!document.getElementById('lockAngle').checked && (activeDrag.cornerIndex === 1 || activeDrag.cornerIndex === 2)) {
+        const dy = point.y - geometry.y;
+        const dx = Math.max(1, point.x - geometry.x);
+        flag.angle = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
+      }
+      updateFlagTableValues();
+      drawFlags();
+    }
+
+    function flagMouseUp() {
+      activeDrag = null;
+    }
+
     function drawDimension(ctx, x1, y1, x2, y2, label) {
-      ctx.strokeStyle = '#f2b84b';
-      ctx.fillStyle = '#f2b84b';
+      ctx.strokeStyle = '#b24ac7';
+      ctx.fillStyle = '#b24ac7';
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(x1, y1 - 5); ctx.lineTo(x1, y1 + 5); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(x2, y2 - 5); ctx.lineTo(x2, y2 + 5); ctx.stroke();
       ctx.fillText(label, (x1 + x2) / 2 - 22, y1 - 8);
+    }
+
+    function drawConstraintLabel(ctx, text, x, y) {
+      ctx.fillStyle = '#b24ac7';
+      ctx.font = '700 15px Arial';
+      ctx.fillText(text, x, y);
+    }
+
+    function drawHandle(ctx, x, y, active, selected) {
+      ctx.fillStyle = active ? '#ff2d20' : selected ? '#f2b84b' : '#39b76a';
+      ctx.strokeStyle = '#10231c';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(x - 5, y - 5, 10, 10);
+      ctx.strokeRect(x - 5, y - 5, 10, 10);
     }
 
     function drawFlags() {
@@ -866,36 +1088,79 @@ def home() -> str:
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#101918';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = '#263b37';
+      ctx.strokeStyle = '#163c3a';
+      ctx.setLineDash([4, 8]);
       for (let x = 40; x < canvas.width; x += 40) {
         ctx.beginPath(); ctx.moveTo(x, 30); ctx.lineTo(x, canvas.height - 35); ctx.stroke();
       }
       for (let y = 40; y < canvas.height; y += 40) {
         ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(canvas.width - 30, y); ctx.stroke();
       }
+      ctx.setLineDash([]);
+      ctx.strokeStyle = '#2ba7a0';
+      ctx.setLineDash([7, 7]);
+      ctx.strokeRect(80, 38, canvas.width - 150, canvas.height - 82);
+      ctx.beginPath(); ctx.moveTo(60, canvas.height / 2); ctx.lineTo(canvas.width - 50, canvas.height / 2); ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.strokeStyle = '#8b5a22';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(112, canvas.height - 94);
+      ctx.lineTo(canvas.width - 118, canvas.height - 94);
+      ctx.lineTo(canvas.width - 118, canvas.height - 64);
+      ctx.lineTo(112, canvas.height - 64);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fillStyle = '#8b5a22';
+      ctx.font = '13px Arial';
+      ctx.fillText('Mandrel / shaft reference envelope', 116, canvas.height - 104);
 
       const maxLength = Math.max(...flags.map(f => f.length), 1);
       const scale = Math.min(1.8, (canvas.width - 180) / maxLength);
       const rowGap = Math.max(78, (canvas.height - 90) / Math.max(flags.length, 1));
+      flagGeometry = [];
       ctx.font = '13px Arial';
       flags.forEach((flag, index) => {
         const y = 72 + index * rowGap;
         const x = 100;
         const points = flagPoints(flag, x, y, scale);
+        flagGeometry.push({x, y, scale, points});
+        ctx.setLineDash([7, 7]);
+        ctx.strokeStyle = '#2a817c';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + flag.length * scale, y); ctx.stroke();
+        ctx.setLineDash([]);
         ctx.beginPath();
         points.forEach((p, i) => {
           if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
         });
         ctx.closePath();
         ctx.fillStyle = index % 2 === 0 ? '#d7fff6' : '#b8e9ff';
-        ctx.globalAlpha = 0.82;
+        ctx.globalAlpha = 0.14;
         ctx.fill();
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = '#35c7b2';
+        ctx.strokeStyle = '#e8efed';
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        ctx.strokeStyle = '#ff6f61';
+        if (selectedFlagIndex === index) {
+          ctx.strokeStyle = '#b24ac7';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
+
+        points.forEach((p, cornerIndex) => {
+          drawHandle(
+            ctx,
+            p[0],
+            p[1],
+            activeDrag && activeDrag.flagIndex === index && activeDrag.cornerIndex === cornerIndex,
+            selectedFlagIndex === index
+          );
+        });
+
+        ctx.strokeStyle = '#b24ac7';
         ctx.beginPath();
         ctx.moveTo(x + 20, y);
         ctx.lineTo(x + Math.cos(flag.angle * Math.PI / 180) * 78, y + Math.sin(flag.angle * Math.PI / 180) * 78);
@@ -904,7 +1169,10 @@ def home() -> str:
         ctx.fillStyle = '#ffffff';
         ctx.fillText(`${flag.name} | ${flag.station} | ${flag.angle} deg`, x, y - flag.root * scale / 2 - 16);
         drawDimension(ctx, x, y + flag.root * scale / 2 + 18, x + flag.length * scale, y + flag.root * scale / 2 + 18, `${flag.length} mm`);
-        ctx.fillStyle = '#f2b84b';
+        drawConstraintLabel(ctx, 'H', x + flag.length * scale / 2, y - 8);
+        drawConstraintLabel(ctx, 'V', x - 22, y + 5);
+        drawConstraintLabel(ctx, 'V', x + flag.length * scale + 10, y + 5);
+        ctx.fillStyle = '#b24ac7';
         ctx.fillText(`Root ${flag.root} mm`, x - 82, y);
         ctx.fillText(`Tip ${flag.tip} mm`, x + flag.length * scale + 14, y);
       });
@@ -914,6 +1182,19 @@ def home() -> str:
       document.getElementById('flagCount').textContent = String(flags.length);
       document.getElementById('flagArea').textContent = Math.round(totalArea).toLocaleString() + ' mm2';
       document.getElementById('flagLongest').textContent = longest + ' mm';
+      document.getElementById('selectedFlagLabel').textContent =
+        selectedFlagIndex === null ? `Tool: ${sketchTool} | No flag selected` : `Tool: ${sketchTool} | Selected: ${flags[selectedFlagIndex].name}`;
+      const hCount = flags.length;
+      const vCount = flags.length * 2;
+      const dimCount = flags.length * 3;
+      const constraintReadout = document.getElementById('constraintReadout');
+      const sideSelection = document.getElementById('sideSelection');
+      if (constraintReadout) constraintReadout.textContent = `H: ${hCount} | V: ${vCount} | DIM: ${dimCount}`;
+      if (sideSelection) {
+        sideSelection.textContent = selectedFlagIndex === null
+          ? `Tool: ${sketchTool}`
+          : `${flags[selectedFlagIndex].name} | L ${flags[selectedFlagIndex].length} | root ${flags[selectedFlagIndex].root} | tip ${flags[selectedFlagIndex].tip}`;
+      }
     }
 
     function flagSvgText() {
@@ -948,6 +1229,181 @@ def home() -> str:
       const a = document.createElement('a');
       a.href = url;
       a.download = 'shaft-flag-drawing.svg';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function shaftCadScript() {
+      const angle = document.getElementById('angle').value;
+      const units = latest ? latest.gcode_settings.units : 'mm';
+      return `"use strict"
+const jscad = require('@jscad/modeling')
+const { cylinder } = jscad.primitives
+const { colorize } = jscad.colors
+
+// Golf shaft parametric mandrel envelope
+// Units: ${units}
+// Wrap angle: ${angle} degrees
+const segments = [
+  { name: 'Butt', length: 254, od: 15, id: 13 },
+  { name: 'Upper mid', length: 254, od: 13, id: 11 },
+  { name: 'Lower mid', length: 254, od: 11, id: 9 },
+  { name: 'Tip', length: 254, od: 9, id: 7 }
+]
+
+function main() {
+  // Render service preview uses drawing math.
+  // Next step: generate tapered cone sections for STL/STEP pipeline.
+  return colorize([0.2, 0.75, 0.66], cylinder({ radius: 7.5, height: 1016 }))
+}
+
+module.exports = { main }`;
+    }
+
+    function loadCadExample(kind) {
+      const examples = {
+        shaft: shaftCadScript(),
+        mandrel: `"use strict"
+// Mandrel core recipe
+// 1. Build tapered cone segments from butt to tip.
+// 2. Join sections into a continuous tool body.
+// 3. Export STEP for machining or STL for checking.
+const mandrel = [
+  { z: 0, od: 15 },
+  { z: 254, od: 13 },
+  { z: 508, od: 11 },
+  { z: 762, od: 9 },
+  { z: 1016, od: 7 }
+]`,
+        flags: JSON.stringify({ flags }, null, 2),
+        imports: `// Import plan
+// SVG: flat prepreg flag drawings
+// STL: visual checking and fixture mockup
+// STEP: manufacturing-grade mandrel and shaft envelope
+// DXF: next target for cutter-ready flag outlines`,
+        extrusion: `// Extrusion example
+// Convert a 2D flag outline into a thin ply sheet.
+// thickness = 0.125 mm prepreg ply`,
+        hollow: `// Hollow operation example
+// outer shaft envelope - inner bore envelope = tube wall`,
+        parametric: `// Parameters
+targetCPM = ${document.getElementById('target').value}
+wrapAngle = ${document.getElementById('angle').value}
+material = "${document.getElementById('material').value}"
+method = "${document.getElementById('method').value}"`
+      };
+      document.getElementById('cadScript').value = examples[kind] || shaftCadScript();
+    }
+
+    function drawCad3d() {
+      const canvas = document.getElementById('cad3dCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const dark = document.getElementById('cadDarkMode')?.checked;
+      const showAxis = document.getElementById('cadShowAxis')?.checked;
+      const showGrid = document.getElementById('cadShowGrid')?.checked;
+      const smooth = document.getElementById('cadSmooth')?.checked;
+      const zoomFit = document.getElementById('cadZoomFit')?.checked;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = dark ? '#101918' : '#f7f8fb';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const originX = canvas.width / 2;
+      const originY = canvas.height / 2 + 70;
+      const gridSpan = zoomFit ? 13 : 18;
+      ctx.strokeStyle = dark ? '#263b37' : '#cfd3ff';
+      ctx.lineWidth = 1;
+      if (showGrid) {
+        for (let i = -gridSpan; i <= gridSpan; i++) {
+          ctx.beginPath();
+          ctx.moveTo(originX + i * 22 - 330, originY + i * 11 + 165);
+          ctx.lineTo(originX + i * 22 + 330, originY + i * 11 - 165);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(originX + i * 22 - 330, originY - i * 11 - 165);
+          ctx.lineTo(originX + i * 22 + 330, originY - i * 11 + 165);
+          ctx.stroke();
+        }
+      }
+
+      if (showAxis) {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#d92929';
+        ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX + 140, originY + 70); ctx.stroke();
+        ctx.strokeStyle = '#16a34a';
+        ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX + 110, originY - 84); ctx.stroke();
+        ctx.strokeStyle = '#304ffe';
+        ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX, originY - 150); ctx.stroke();
+      }
+
+      const shaftX = originX - 230;
+      const shaftY = originY - 20;
+      const length = 460;
+      const butt = 48;
+      const tip = 22;
+      ctx.beginPath();
+      ctx.moveTo(shaftX, shaftY - butt / 2);
+      ctx.lineTo(shaftX + length, shaftY - tip / 2);
+      ctx.lineTo(shaftX + length + 46, shaftY + 13);
+      ctx.lineTo(shaftX + 46, shaftY + butt / 2 + 13);
+      ctx.closePath();
+      ctx.fillStyle = '#35c7b2';
+      ctx.globalAlpha = smooth ? 0.9 : 0.72;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = dark ? '#d7fff6' : '#12665d';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = dark ? '#ffffff' : '#17211f';
+      ctx.font = '14px Arial';
+      ctx.fillText('Tapered shaft / mandrel preview', shaftX, shaftY - 52);
+      ctx.fillText('Butt OD 15 mm', shaftX - 12, shaftY + 62);
+      ctx.fillText('Tip OD 7 mm', shaftX + length - 8, shaftY + 48);
+
+      ctx.fillStyle = '#d7d7d7';
+      ctx.strokeStyle = '#a9a9a9';
+      ctx.lineWidth = 1;
+      const cubeX = canvas.width - 128;
+      const cubeY = 48;
+      ctx.beginPath();
+      ctx.moveTo(cubeX, cubeY);
+      ctx.lineTo(cubeX + 54, cubeY + 26);
+      ctx.lineTo(cubeX + 54, cubeY + 84);
+      ctx.lineTo(cubeX, cubeY + 58);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ededed';
+      ctx.beginPath();
+      ctx.moveTo(cubeX, cubeY);
+      ctx.lineTo(cubeX + 48, cubeY - 26);
+      ctx.lineTo(cubeX + 102, cubeY);
+      ctx.lineTo(cubeX + 54, cubeY + 26);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#cfcfcf';
+      ctx.beginPath();
+      ctx.moveTo(cubeX + 54, cubeY + 26);
+      ctx.lineTo(cubeX + 102, cubeY);
+      ctx.lineTo(cubeX + 102, cubeY + 58);
+      ctx.lineTo(cubeX + 54, cubeY + 84);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#555';
+      ctx.fillText('TOP', cubeX + 43, cubeY - 2);
+      ctx.fillText('FRONT', cubeX + 8, cubeY + 48);
+      ctx.fillText('RIGHT', cubeX + 62, cubeY + 48);
+
+      const script = document.getElementById('cadScript');
+      if (script) script.value = shaftCadScript();
+    }
+
+    function downloadCadScript(button) {
+      flashButton(button, 'Exported');
+      const blob = new Blob([shaftCadScript()], {type: 'text/plain'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-parametric-model.jscad';
       a.click();
       URL.revokeObjectURL(url);
     }
