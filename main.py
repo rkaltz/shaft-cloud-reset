@@ -78,6 +78,13 @@ MANUFACTURING_METHODS: dict[str, dict[str, Any]] = {
         "cost_factor": 1.7,
         "note": "Variable-angle tow/tape placement with local wall-thickness steering.",
     },
+    "braid_tape_braid": {
+        "name": "Braid-tape-braid hybrid",
+        "torsion_factor": 1.26,
+        "mass_factor": 1.08,
+        "cost_factor": 1.85,
+        "note": "Inner braid sleeve, localized UD tape reinforcement, then outer braid consolidation sleeve.",
+    },
 }
 
 ARCHITECTURE_MODES: dict[str, dict[str, Any]] = {
@@ -110,6 +117,12 @@ ARCHITECTURE_MODES: dict[str, dict[str, Any]] = {
         "cad_role": "Variable angle tape path with localized wall-thickness control",
         "exports": ["tape_path_json", "gcode", "step_recipe"],
         "design_objects": ["steered_tow", "tape_width", "path_station", "course"],
+    },
+    "braid_tape_braid": {
+        "name": "Braid-tape-braid hybrid",
+        "cad_role": "Inner braided sleeve, localized UD tape reinforcement, and outer braided sleeve",
+        "exports": ["tape_schedule_json", "braid_stack_report", "gcode", "step_recipe"],
+        "design_objects": ["inner_braid", "ud_tape_strip", "bias_tape_strip", "outer_braid", "layer_index"],
     },
 }
 
@@ -565,6 +578,11 @@ def home() -> str:
     .layer-tag { display: inline-block; padding: 2px 7px; border-radius: 999px; color: #101918; font-weight: 700; font-size: 12px; }
     .editable-table input { margin: 0; padding: 6px; font-size: 13px; }
     .editable-table button { margin: 0; padding: 6px; }
+    .tape-board { display: grid; grid-template-columns: 1fr 380px; gap: 14px; align-items: start; }
+    .tape-canvas { height: 520px; background: #101918; border-color: #344642; }
+    .tape-summary { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; }
+    .tape-summary h3 { margin-top: 0; }
+    .tape-badge { display: inline-block; background: #17211f; color: #d7fff6; padding: 4px 8px; border-radius: 999px; margin: 3px; font-size: 12px; font-weight: 700; }
     pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; max-height: 300px; overflow: auto; }
     @media (max-width: 900px) { main, .grid2 { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } }
   </style>
@@ -604,6 +622,7 @@ def home() -> str:
         <option value="filament_winding">Filament winding</option>
         <option value="hybrid_3d">3D multi-axial hybrid weave</option>
         <option value="automated_tape">Automated tape winding</option>
+        <option value="braid_tape_braid">Braid-tape-braid hybrid</option>
       </select>
       <label>CAD Architecture Mode</label>
       <select id="architectureMode" onchange="updateArchitecturePanel(); drawCad3d();">
@@ -612,6 +631,7 @@ def home() -> str:
         <option value="tubular_braid">Tubular braid</option>
         <option value="hybrid_flag_helix">Hybrid flag + helix</option>
         <option value="automated_tape">Automated tape placement</option>
+        <option value="braid_tape_braid">Braid-tape-braid hybrid</option>
       </select>
       <h3 class="panel-title">G-Code Settings</h3>
       <label>Units</label>
@@ -656,6 +676,7 @@ def home() -> str:
           <button class="tab" id="fitTab" onclick="showView('fit')">Fit-to-Build</button>
           <button class="tab" id="drawTab" onclick="showView('drawing')">Design / Drawing</button>
           <button class="tab" id="flagTab" onclick="showView('flags')">Flag CAD</button>
+          <button class="tab" id="tapeTab" onclick="showView('tape')">TapeCAD</button>
           <button class="tab" id="cad3dTab" onclick="showView('cad3d')">3D CAD</button>
         </div>
       </div>
@@ -811,6 +832,45 @@ def home() -> str:
           <tbody id="flagRows"></tbody>
         </table>
       </div>
+      <div id="tapeView" class="view hidden">
+        <div class="cad-strip">
+          <div class="cad-chip">Module<strong>TapeCAD</strong></div>
+          <div class="cad-chip">Tape Count<strong id="tapeCount">-</strong></div>
+          <div class="cad-chip">Mass Added<strong id="tapeMass">-</strong></div>
+          <div class="cad-chip">CPM Boost<strong id="tapeCpmBoost">-</strong></div>
+        </div>
+        <h3>Localized Carbon Tape Reinforcement</h3>
+        <div class="tape-board">
+          <div>
+            <canvas class="tape-canvas" id="tapeCanvas" width="1120" height="520"></canvas>
+          </div>
+          <div class="tape-summary">
+            <h3>Braid-Tape-Braid Stack</h3>
+            <div id="tapeStackBadges"></div>
+            <table><tbody id="tapeSummary"></tbody></table>
+            <button onclick="addTape(this)">Add Tape Strip</button>
+            <button class="secondary" onclick="addBiasTapePair(this)">Add +/-45 Pair</button>
+            <button class="secondary" onclick="resetTapes(this)">Reset TapeCAD</button>
+            <button class="secondary" onclick="downloadTapeJson(this)">Export Tape JSON</button>
+          </div>
+        </div>
+        <h3>Editable Tape Schedule</h3>
+        <table class="editable-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Start in</th>
+              <th>Length mm</th>
+              <th>Width mm</th>
+              <th>Thickness mm</th>
+              <th>Angle</th>
+              <th>Layer</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tapeRows"></tbody>
+        </table>
+      </div>
       <div id="cad3dView" class="view hidden">
         <div class="cad-strip">
           <div class="cad-chip">Model<strong>Composite Shaft</strong></div>
@@ -876,6 +936,7 @@ def home() -> str:
   <script>
     let latest = null;
     let flags = defaultFlags();
+    let tapes = defaultTapes();
     let flagGeometry = [];
     let activeDrag = null;
     let selectedFlagIndex = null;
@@ -911,6 +972,12 @@ def home() -> str:
         cadRole: 'Variable angle tape path with localized wall-thickness control',
         exports: ['Tape path JSON', 'G-code', 'STEP recipe'],
         objects: ['Steered tow', 'Tape width', 'Path station', 'Course']
+      },
+      braid_tape_braid: {
+        name: 'Braid-tape-braid hybrid',
+        cadRole: 'Inner braided sleeve, localized UD tape reinforcement, and outer braided sleeve',
+        exports: ['Tape schedule JSON', 'Braid stack report', 'G-code', 'STEP recipe'],
+        objects: ['Inner braid', 'UD tape strip', 'Bias tape strip', 'Outer braid', 'Layer index']
       }
     };
 
@@ -931,29 +998,43 @@ def home() -> str:
       ];
     }
 
+    function defaultTapes() {
+      return [
+        {name: 'Butt CPM strip', startIn: 41, length: 260, width: 12, thickness: 0.125, angle: 0, layer: 'between inner braid and outer braid'},
+        {name: 'Mid +45 torque tape', startIn: 26, length: 220, width: 10, thickness: 0.125, angle: 45, layer: 'over inner braid'},
+        {name: 'Mid -45 torque tape', startIn: 26, length: 220, width: 10, thickness: 0.125, angle: -45, layer: 'over inner braid'},
+        {name: 'Tip hoop support', startIn: 16, length: 150, width: 8, thickness: 0.125, angle: 90, layer: 'under outer braid'}
+      ];
+    }
+
     function showView(viewName) {
       const simulation = document.getElementById('simulationView');
       const fitView = document.getElementById('fitView');
       const drawing = document.getElementById('drawingView');
       const flagView = document.getElementById('flagView');
+      const tapeView = document.getElementById('tapeView');
       const cad3dView = document.getElementById('cad3dView');
       const simTab = document.getElementById('simTab');
       const fitTab = document.getElementById('fitTab');
       const drawTab = document.getElementById('drawTab');
       const flagTab = document.getElementById('flagTab');
+      const tapeTab = document.getElementById('tapeTab');
       const cad3dTab = document.getElementById('cad3dTab');
       simulation.classList.toggle('hidden', viewName !== 'simulation');
       fitView.classList.toggle('hidden', viewName !== 'fit');
       drawing.classList.toggle('hidden', viewName !== 'drawing');
       flagView.classList.toggle('hidden', viewName !== 'flags');
+      tapeView.classList.toggle('hidden', viewName !== 'tape');
       cad3dView.classList.toggle('hidden', viewName !== 'cad3d');
       simTab.classList.toggle('active', viewName === 'simulation');
       fitTab.classList.toggle('active', viewName === 'fit');
       drawTab.classList.toggle('active', viewName === 'drawing');
       flagTab.classList.toggle('active', viewName === 'flags');
+      tapeTab.classList.toggle('active', viewName === 'tape');
       cad3dTab.classList.toggle('active', viewName === 'cad3d');
       if (viewName === 'drawing' && latest) drawDesign(latest);
       if (viewName === 'flags') renderFlagEditor();
+      if (viewName === 'tape') renderTapeCad();
       if (viewName === 'cad3d') {
         updateArchitecturePanel();
         drawCad3d();
@@ -1043,6 +1124,7 @@ def home() -> str:
       drawChart(latest.zone_profile);
       drawDesign(latest);
       renderFlagEditor();
+      renderTapeCad();
       drawCad3d();
       writeCadConsole('Analysis complete. CadQuery STEP recipe ready for export.');
     }
@@ -1651,6 +1733,203 @@ ${y2.toFixed(3)}
       URL.revokeObjectURL(url);
     }
 
+    function tapeMassGrams() {
+      const densityMgMm3 = 0.0016;
+      return tapes.reduce((sum, tape) => sum + tape.length * tape.width * tape.thickness * densityMgMm3, 0);
+    }
+
+    function tapeCpmBoost() {
+      return tapes.reduce((sum, tape) => {
+        const angle = Math.abs(Number(tape.angle));
+        const directional = angle === 0 ? 1.0 : angle === 90 ? 0.25 : 0.55;
+        const stationBias = Number(tape.startIn) >= 31 ? 1.15 : Number(tape.startIn) <= 16 ? 0.8 : 1.0;
+        return sum + (tape.length * tape.width * tape.thickness / 1000) * directional * stationBias * 0.42;
+      }, 0);
+    }
+
+    function tapeTorqueReduction() {
+      return tapes.reduce((sum, tape) => {
+        const angle = Math.abs(Number(tape.angle));
+        const angleFactor = angle === 45 ? 1.0 : angle === 90 ? 0.45 : 0.25;
+        return sum + (tape.length * tape.width * tape.thickness / 1000) * angleFactor * 0.08;
+      }, 0);
+    }
+
+    function renderTapeCad() {
+      renderTapeTable();
+      drawTapeCad();
+    }
+
+    function renderTapeTable() {
+      const rows = tapes.map((tape, index) => `
+        <tr>
+          <td><input id="tapeName${index}" value="${tape.name}" onchange="updateTape(${index})"></td>
+          <td><input id="tapeStart${index}" type="number" value="${tape.startIn}" step="1" onchange="updateTape(${index})"></td>
+          <td><input id="tapeLength${index}" type="number" value="${tape.length}" step="5" onchange="updateTape(${index})"></td>
+          <td><input id="tapeWidth${index}" type="number" value="${tape.width}" step="1" onchange="updateTape(${index})"></td>
+          <td><input id="tapeThickness${index}" type="number" value="${tape.thickness}" step="0.025" onchange="updateTape(${index})"></td>
+          <td><input id="tapeAngle${index}" type="number" value="${tape.angle}" step="1" onchange="updateTape(${index})"></td>
+          <td><input id="tapeLayer${index}" value="${tape.layer}" onchange="updateTape(${index})"></td>
+          <td><button class="secondary" onclick="deleteTape(${index}, this)">Delete</button></td>
+        </tr>
+      `).join('');
+      const table = document.getElementById('tapeRows');
+      if (table) table.innerHTML = rows;
+    }
+
+    function updateTape(index) {
+      tapes[index] = {
+        name: document.getElementById(`tapeName${index}`).value,
+        startIn: Number(document.getElementById(`tapeStart${index}`).value),
+        length: Number(document.getElementById(`tapeLength${index}`).value),
+        width: Number(document.getElementById(`tapeWidth${index}`).value),
+        thickness: Number(document.getElementById(`tapeThickness${index}`).value),
+        angle: Number(document.getElementById(`tapeAngle${index}`).value),
+        layer: document.getElementById(`tapeLayer${index}`).value
+      };
+      drawTapeCad();
+      drawCad3d();
+    }
+
+    function addTape(button) {
+      flashButton(button, 'Added');
+      tapes.push({name: 'New UD tape strip', startIn: 31, length: 200, width: 10, thickness: 0.125, angle: 0, layer: 'between braid layers'});
+      renderTapeCad();
+      drawCad3d();
+    }
+
+    function addBiasTapePair(button) {
+      flashButton(button, 'Added');
+      tapes.push({name: 'Bias +45 tape', startIn: 21, length: 190, width: 10, thickness: 0.125, angle: 45, layer: 'torque pair'});
+      tapes.push({name: 'Bias -45 tape', startIn: 21, length: 190, width: 10, thickness: 0.125, angle: -45, layer: 'torque pair'});
+      renderTapeCad();
+      drawCad3d();
+    }
+
+    function deleteTape(index, button) {
+      flashButton(button, 'Deleted');
+      tapes.splice(index, 1);
+      renderTapeCad();
+      drawCad3d();
+    }
+
+    function resetTapes(button) {
+      flashButton(button, 'Reset');
+      tapes = defaultTapes();
+      renderTapeCad();
+      drawCad3d();
+    }
+
+    function tapeColor(angle) {
+      const abs = Math.abs(Number(angle));
+      if (abs === 0) return '#f2b84b';
+      if (abs === 45) return '#ff7de9';
+      if (abs === 90) return '#86fff2';
+      return '#d7fff6';
+    }
+
+    function drawTapeCad() {
+      const canvas = document.getElementById('tapeCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#101918';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#163c3a';
+      ctx.setLineDash([4, 8]);
+      for (let x = 50; x < canvas.width; x += 50) {
+        ctx.beginPath(); ctx.moveTo(x, 40); ctx.lineTo(x, canvas.height - 40); ctx.stroke();
+      }
+      for (let y = 50; y < canvas.height; y += 50) {
+        ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(canvas.width - 40, y); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      const startX = 90;
+      const endX = canvas.width - 90;
+      const centerY = 250;
+      const lengthPx = endX - startX;
+      ctx.strokeStyle = '#8b5a22';
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(startX, centerY); ctx.lineTo(endX, centerY); ctx.stroke();
+      ctx.fillStyle = '#d7fff6';
+      ctx.font = '14px Arial';
+      ctx.fillText('Unwrapped shaft tape schedule: butt 41 in -> tip 11 in', startX, 44);
+
+      const stations = [41, 36, 31, 26, 21, 16, 11];
+      stations.forEach(station => {
+        const t = (41 - station) / 30;
+        const x = startX + t * lengthPx;
+        ctx.strokeStyle = '#2ba7a0';
+        ctx.beginPath(); ctx.moveTo(x, centerY - 92); ctx.lineTo(x, centerY + 92); ctx.stroke();
+        ctx.fillStyle = '#d7fff6';
+        ctx.fillText(`${station}"`, x - 12, centerY + 118);
+      });
+
+      tapes.forEach((tape, index) => {
+        const t = Math.max(0, Math.min(1, (41 - tape.startIn) / 30));
+        const x = startX + t * lengthPx;
+        const w = Math.max(40, tape.length * 0.72);
+        const h = Math.max(6, tape.width * 1.6);
+        const y = 92 + index * 72;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Number(tape.angle) * Math.PI / 180 * 0.18);
+        ctx.fillStyle = tapeColor(tape.angle);
+        ctx.globalAlpha = 0.25;
+        ctx.fillRect(0, -h / 2, w, h);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = tapeColor(tape.angle);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(0, -h / 2, w, h);
+        ctx.restore();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`${tape.name} | ${tape.angle} deg | ${tape.width}mm x ${tape.length}mm`, x, y - h - 10);
+      });
+
+      const mass = tapeMassGrams();
+      const cpm = tapeCpmBoost();
+      const torque = tapeTorqueReduction();
+      document.getElementById('tapeCount').textContent = String(tapes.length);
+      document.getElementById('tapeMass').textContent = mass.toFixed(2) + ' g';
+      document.getElementById('tapeCpmBoost').textContent = '+' + cpm.toFixed(1);
+      document.getElementById('tapeStackBadges').innerHTML = [
+        'Mandrel',
+        'Inner braid',
+        'UD tape',
+        '+/-45 tape',
+        'Outer braid',
+        'Cure wrap'
+      ].map(item => `<span class="tape-badge">${item}</span>`).join('');
+      document.getElementById('tapeSummary').innerHTML = [
+        ['Estimated tape mass', mass.toFixed(2) + ' g'],
+        ['Estimated CPM boost', '+' + cpm.toFixed(1) + ' CPM'],
+        ['Estimated torque reduction', '-' + torque.toFixed(2) + ' deg'],
+        ['Recommended architecture', 'Braid-tape-braid hybrid'],
+        ['Build role', 'Localized rigidity between braid layers']
+      ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
+    }
+
+    function downloadTapeJson(button) {
+      flashButton(button, 'Exported');
+      const payload = {
+        module: 'TapeCAD',
+        architecture: 'braid_tape_braid',
+        estimated_mass_g: tapeMassGrams(),
+        estimated_cpm_boost: tapeCpmBoost(),
+        estimated_torque_reduction_deg: tapeTorqueReduction(),
+        stack: ['mandrel', 'inner_braid', 'localized_tape', 'outer_braid', 'cure_wrap'],
+        tapes
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-tapecad-schedule.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
     function currentProject() {
       return {
         version: 1,
@@ -1665,7 +1944,8 @@ ${y2.toFixed(3)}
           manufacturing_method: document.getElementById('method').value
         },
         gcode: latest ? latest.gcode_settings : {},
-        flags
+        flags,
+        tapes
       };
     }
 
@@ -1698,6 +1978,10 @@ ${y2.toFixed(3)}
         if (Array.isArray(project.flags)) {
           flags = project.flags;
           renderFlagEditor();
+        }
+        if (Array.isArray(project.tapes)) {
+          tapes = project.tapes;
+          renderTapeCad();
         }
         run();
       };
@@ -1887,7 +2171,7 @@ method = "${document.getElementById('method').value}"`
       const primary = dark ? '#f2b84b' : '#a85f00';
       const secondary = dark ? '#ff7de9' : '#7b2c7e';
       const cyan = dark ? '#86fff2' : '#087c75';
-      if (key === 'flag_wrap' || key === 'hybrid_flag_helix') {
+      if (key === 'flag_wrap' || key === 'hybrid_flag_helix' || key === 'braid_tape_braid') {
         flags.slice(0, 5).forEach((flag, index) => {
           const t = Math.min(0.92, 0.08 + index * 0.18);
           const x = shaftX + t * length;
@@ -1918,6 +2202,25 @@ method = "${document.getElementById('method').value}"`
           drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, phase, cyan, []);
           drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, -phase, primary, [7, 5]);
         }
+      }
+      if (key === 'braid_tape_braid') {
+        for (let phase = 0; phase < Math.PI * 2; phase += Math.PI / 2) {
+          drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, phase, cyan, [6, 5]);
+          drawHelixLine(ctx, shaftX, shaftY, length, butt, tip, -phase, primary, [8, 6]);
+        }
+        tapes.forEach((tape, index) => {
+          const t = Math.max(0, Math.min(1, (41 - tape.startIn) / 30));
+          const x = shaftX + t * length;
+          const y = shaftY - 36 - index * 10;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(Number(tape.angle) * Math.PI / 180 * 0.18);
+          ctx.fillStyle = tapeColor(tape.angle);
+          ctx.globalAlpha = 0.72;
+          ctx.fillRect(0, -3, Math.max(28, tape.length * 0.28), 6);
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        });
       }
       ctx.fillStyle = dark ? '#d7fff6' : '#17211f';
       ctx.font = '12px Arial';
@@ -2086,6 +2389,13 @@ method = "${document.getElementById('method').value}"`
     window.applyFitToCad = applyFitToCad;
     window.downloadFitProfile = downloadFitProfile;
     window.renderFlagEditor = renderFlagEditor;
+    window.renderTapeCad = renderTapeCad;
+    window.addTape = addTape;
+    window.addBiasTapePair = addBiasTapePair;
+    window.updateTape = updateTape;
+    window.deleteTape = deleteTape;
+    window.resetTapes = resetTapes;
+    window.downloadTapeJson = downloadTapeJson;
     window.downloadCadScript = downloadCadScript;
     window.downloadJson = downloadJson;
     window.downloadGcode = downloadGcode;
