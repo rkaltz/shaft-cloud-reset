@@ -1033,11 +1033,13 @@ def home() -> str:
       return false;
     };
 
-    window.addEventListener('unhandledrejection', event => {
-      const reason = event.reason?.message || event.reason || 'unknown promise failure';
-      setAppStatus(`Async app error: ${reason}`, true);
-      writeCadConsole(`Async app error: ${reason}`);
-    });
+    if (typeof window.addEventListener === 'function') {
+      window.addEventListener('unhandledrejection', event => {
+        const reason = event.reason?.message || event.reason || 'unknown promise failure';
+        setAppStatus(`Async app error: ${reason}`, true);
+        writeCadConsole(`Async app error: ${reason}`);
+      });
+    }
 
     function defaultFlags() {
       return [
@@ -2872,8 +2874,12 @@ method = "${document.getElementById('method').value}"`
     function bootstrapButtons() {
       const routes = buttonRoutes();
       Object.keys(routes).forEach(id => bindClickById(id, button => routes[id](button)));
-      document.removeEventListener('click', emergencyClickRouter, true);
-      document.addEventListener('click', emergencyClickRouter, true);
+      if (typeof document.removeEventListener === 'function') {
+        document.removeEventListener('click', emergencyClickRouter, true);
+      }
+      if (typeof document.addEventListener === 'function') {
+        document.addEventListener('click', emergencyClickRouter, true);
+      }
       setAppStatus('AE boot OK: JavaScript loaded, buttons bound, emergency click router active.');
       writeCadConsole('Button safety bootstrap active: id bindings loaded. Emergency click router active.');
     }
@@ -2929,7 +2935,7 @@ method = "${document.getElementById('method').value}"`
       });
     }
 
-    if (document.readyState === 'loading') {
+    if (document.readyState === 'loading' && typeof document.addEventListener === 'function') {
       document.addEventListener('DOMContentLoaded', bootApp);
     } else {
       bootApp();
