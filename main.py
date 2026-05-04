@@ -395,6 +395,7 @@ def home() -> str:
     input, select, button { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 5px; border: 1px solid #b9c8c4; border-radius: 6px; font-size: 15px; }
     button { border: 0; background: #17695f; color: white; font-weight: 700; cursor: pointer; margin-top: 16px; }
     button.secondary { background: #4d5f5b; }
+    button.clicked { background: #d9911f; color: #17211f; }
     .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .panel-title { margin-top: 18px; padding-top: 14px; border-top: 1px solid #dbe4e1; font-size: 16px; }
     .metrics { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }
@@ -470,9 +471,9 @@ def home() -> str:
       </div>
       <label>Spin Feed</label>
       <input id="spinFeed" type="number" value="300" step="10" min="1">
-      <button onclick="run()">Analyze Shaft</button>
-      <button class="secondary" onclick="downloadJson()">Export JSON</button>
-      <button class="secondary" onclick="downloadGcode()">Export G-Code</button>
+      <button onclick="run(this)">Analyze Shaft</button>
+      <button class="secondary" onclick="downloadJson(this)">Export JSON</button>
+      <button class="secondary" onclick="downloadGcode(this)">Export G-Code</button>
       <p><a href="/docs">Developer API tester</a></p>
     </section>
     <section>
@@ -505,7 +506,19 @@ def home() -> str:
   <script>
     let latest = null;
 
-    async function run() {
+    function flashButton(button, label) {
+      if (!button) return;
+      const original = button.textContent;
+      button.classList.add('clicked');
+      if (label) button.textContent = label;
+      setTimeout(() => {
+        button.classList.remove('clicked');
+        button.textContent = original;
+      }, 900);
+    }
+
+    async function run(button) {
+      flashButton(button, 'Analyzing...');
       const params = new URLSearchParams({
         target_cpm: document.getElementById('target').value,
         head_weight_g: document.getElementById('head').value,
@@ -592,8 +605,9 @@ def home() -> str:
       });
     }
 
-    function downloadJson() {
+    function downloadJson(button) {
       if (!latest) return;
+      flashButton(button, 'Exported');
       const blob = new Blob([JSON.stringify(latest, null, 2)], {type: 'application/json'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -603,8 +617,9 @@ def home() -> str:
       URL.revokeObjectURL(url);
     }
 
-    function downloadGcode() {
+    function downloadGcode(button) {
       if (!latest) return;
+      flashButton(button, 'Exported');
       const blob = new Blob([latest.gcode], {type: 'text/plain'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
