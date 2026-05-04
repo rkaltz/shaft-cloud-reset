@@ -1805,7 +1805,7 @@ ${y2.toFixed(3)}
         const inZone = stationIn <= tapeStart && stationIn >= tapeEnd;
         if (!inZone) return sum;
         const angle = Math.abs(Number(tape.angle));
-        const directional = angle === 0 ? 1.0 : angle === 90 ? 0.2 : angle === 0 ? 1.0 : 0.55;
+        const directional = angle === 0 ? 1.0 : angle === 90 ? 0.2 : 0.55;
         return sum + (Number(tape.width) * Number(tape.thickness) / 10) * directional;
       }, 0);
     }
@@ -2783,12 +2783,90 @@ method = "${document.getElementById('method').value}"`
       URL.revokeObjectURL(url);
     }
 
+    function safeInvoke(name, callback) {
+      try {
+        callback();
+      } catch (error) {
+        writeCadConsole(`${name} failed: ${error.message || String(error)}`);
+      }
+    }
+
+    function bindClickById(id, callback) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.onclick = null;
+      element.addEventListener('click', event => {
+        event.preventDefault();
+        safeInvoke(id, () => callback(element));
+      });
+    }
+
+    function bootstrapButtons() {
+      bindClickById('simTab', () => showView('simulation'));
+      bindClickById('fitTab', () => showView('fit'));
+      bindClickById('drawTab', () => showView('drawing'));
+      bindClickById('flagTab', () => showView('flags'));
+      bindClickById('tapeTab', () => showView('tape'));
+      bindClickById('stackTab', () => showView('stack'));
+      bindClickById('cad3dTab', () => showView('cad3d'));
+
+      document.querySelectorAll('button').forEach(button => {
+        const label = button.textContent.trim();
+        if (button.dataset.bound === '1') return;
+        const actions = {
+          'Analyze Shaft': () => run(button),
+          'Export JSON': () => downloadJson(button),
+          'Export G-Code': () => downloadGcode(button),
+          'Generate Shaft Target': () => runFitToBuild(button),
+          'Apply to CAD': () => applyFitToCad(button),
+          'Export Fit Profile': () => downloadFitProfile(button),
+          'Add Flag': () => addFlag(button),
+          'Add Triangle': () => addTriangleFlag(button),
+          'Reset Flags': () => resetFlags(button),
+          'Export Flag JSON': () => downloadFlagJson(button),
+          'Export Flag SVG': () => downloadFlagSvg(button),
+          'Export DXF': () => downloadFlagDxf(button),
+          'Save Project': () => downloadProject(button),
+          'Add Tape Strip': () => addTape(button),
+          'Add +/-45 Pair': () => addBiasTapePair(button),
+          'Reset TapeCAD': () => resetTapes(button),
+          'Export Tape JSON': () => downloadTapeJson(button),
+          'Regenerate from CAD Objects': () => regenerateStack(button),
+          'Export Stack JSON': () => downloadStackJson(button),
+          'Export Build Sheet': () => downloadBuildSheet(button),
+          'Export': () => downloadCadScript(button)
+        };
+        if (!actions[label]) return;
+        button.dataset.bound = '1';
+        button.onclick = null;
+        button.addEventListener('click', event => {
+          event.preventDefault();
+          safeInvoke(label, actions[label]);
+        });
+      });
+      writeCadConsole('Button safety bootstrap active.');
+    }
+
     window.showView = showView;
+    window.setSketchTool = setSketchTool;
     window.run = run;
     window.runFitToBuild = runFitToBuild;
     window.applyFitToCad = applyFitToCad;
     window.downloadFitProfile = downloadFitProfile;
     window.renderFlagEditor = renderFlagEditor;
+    window.addFlag = addFlag;
+    window.addTriangleFlag = addTriangleFlag;
+    window.deleteFlag = deleteFlag;
+    window.resetFlags = resetFlags;
+    window.flagMouseDown = flagMouseDown;
+    window.flagMouseMove = flagMouseMove;
+    window.flagMouseUp = flagMouseUp;
+    window.updateFlag = updateFlag;
+    window.downloadFlagJson = downloadFlagJson;
+    window.downloadFlagSvg = downloadFlagSvg;
+    window.downloadFlagDxf = downloadFlagDxf;
+    window.downloadProject = downloadProject;
+    window.loadProjectFile = loadProjectFile;
     window.renderTapeCad = renderTapeCad;
     window.addTape = addTape;
     window.addBiasTapePair = addBiasTapePair;
@@ -2801,10 +2879,15 @@ method = "${document.getElementById('method').value}"`
     window.moveStackLayer = moveStackLayer;
     window.downloadStackJson = downloadStackJson;
     window.downloadBuildSheet = downloadBuildSheet;
+    window.loadCadExample = loadCadExample;
+    window.updateArchitecturePanel = updateArchitecturePanel;
+    window.drawCad3d = drawCad3d;
     window.downloadCadScript = downloadCadScript;
     window.downloadJson = downloadJson;
     window.downloadGcode = downloadGcode;
+    window.bootstrapButtons = bootstrapButtons;
 
+    bootstrapButtons();
     run().catch(error => writeCadConsole(error.message || String(error)));
   </script>
 </body>
