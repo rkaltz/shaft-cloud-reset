@@ -671,9 +671,9 @@ def home() -> str:
       </div>
       <label>Spin Feed</label>
       <input id="spinFeed" type="number" value="300" step="10" min="1">
-      <button onclick="run(this)">Analyze Shaft</button>
-      <button class="secondary" onclick="downloadJson(this)">Export JSON</button>
-      <button class="secondary" onclick="downloadGcode(this)">Export G-Code</button>
+      <button id="analyzeBtn" onclick="run(this)">Analyze Shaft</button>
+      <button id="exportJsonBtn" class="secondary" onclick="downloadJson(this)">Export JSON</button>
+      <button id="exportGcodeBtn" class="secondary" onclick="downloadGcode(this)">Export G-Code</button>
       <p><a href="/docs">Developer API tester</a></p>
     </section>
     <section class="workspace">
@@ -734,9 +734,9 @@ def home() -> str:
           <div><label>Target Weight (g)</label><input id="fitWeight" type="number" value="65" step="1"></div>
         </div>
         <div class="fit-actions">
-          <button onclick="runFitToBuild(this)">Generate Shaft Target</button>
-          <button class="secondary" onclick="applyFitToCad(this)">Apply to CAD</button>
-          <button class="secondary" onclick="downloadFitProfile(this)">Export Fit Profile</button>
+          <button id="fitGenerateBtn" onclick="runFitToBuild(this)">Generate Shaft Target</button>
+          <button id="fitApplyBtn" class="secondary" onclick="applyFitToCad(this)">Apply to CAD</button>
+          <button id="fitExportBtn" class="secondary" onclick="downloadFitProfile(this)">Export Fit Profile</button>
         </div>
         <div class="grid2">
           <div>
@@ -812,16 +812,16 @@ def home() -> str:
           <span id="selectedFlagLabel">No flag selected</span>
         </div>
         <div class="tool-row">
-          <button onclick="addFlag(this)">Add Flag</button>
-          <button onclick="addTriangleFlag(this)">Add Triangle</button>
-          <button class="secondary" onclick="resetFlags(this)">Reset Flags</button>
-          <button class="secondary" onclick="downloadFlagJson(this)">Export Flag JSON</button>
-          <button class="secondary" onclick="downloadFlagSvg(this)">Export Flag SVG</button>
-          <button class="secondary" onclick="downloadFlagDxf(this)">Export DXF</button>
+          <button id="flagAddBtn" onclick="addFlag(this)">Add Flag</button>
+          <button id="flagTriangleBtn" onclick="addTriangleFlag(this)">Add Triangle</button>
+          <button id="flagResetBtn" class="secondary" onclick="resetFlags(this)">Reset Flags</button>
+          <button id="flagJsonBtn" class="secondary" onclick="downloadFlagJson(this)">Export Flag JSON</button>
+          <button id="flagSvgBtn" class="secondary" onclick="downloadFlagSvg(this)">Export Flag SVG</button>
+          <button id="flagDxfBtn" class="secondary" onclick="downloadFlagDxf(this)">Export DXF</button>
         </div>
         <div class="tool-row">
-          <button class="secondary" onclick="downloadProject(this)">Save Project</button>
-          <button class="secondary" onclick="document.getElementById('projectFile').click()">Load Project</button>
+          <button id="projectSaveBtn" class="secondary" onclick="downloadProject(this)">Save Project</button>
+          <button id="projectLoadBtn" class="secondary" onclick="document.getElementById('projectFile').click()">Load Project</button>
           <input id="projectFile" type="file" accept="application/json,.json" style="display:none" onchange="loadProjectFile(event)">
         </div>
         <h3>Editable Flag Dimensions</h3>
@@ -857,10 +857,10 @@ def home() -> str:
             <h3>Braid-Tape-Braid Stack</h3>
             <div id="tapeStackBadges"></div>
             <table><tbody id="tapeSummary"></tbody></table>
-            <button onclick="addTape(this)">Add Tape Strip</button>
-            <button class="secondary" onclick="addBiasTapePair(this)">Add +/-45 Pair</button>
-            <button class="secondary" onclick="resetTapes(this)">Reset TapeCAD</button>
-            <button class="secondary" onclick="downloadTapeJson(this)">Export Tape JSON</button>
+            <button id="tapeAddBtn" onclick="addTape(this)">Add Tape Strip</button>
+            <button id="tapeBiasBtn" class="secondary" onclick="addBiasTapePair(this)">Add +/-45 Pair</button>
+            <button id="tapeResetBtn" class="secondary" onclick="resetTapes(this)">Reset TapeCAD</button>
+            <button id="tapeJsonBtn" class="secondary" onclick="downloadTapeJson(this)">Export Tape JSON</button>
           </div>
         </div>
         <h3>Editable Tape Schedule</h3>
@@ -894,9 +894,9 @@ def home() -> str:
           </div>
           <div class="stack-summary">
             <h3>Build Sheet Controls</h3>
-            <button onclick="regenerateStack(this)">Regenerate from CAD Objects</button>
-            <button class="secondary" onclick="downloadStackJson(this)">Export Stack JSON</button>
-            <button class="secondary" onclick="downloadBuildSheet(this)">Export Build Sheet</button>
+            <button id="stackGenerateBtn" onclick="regenerateStack(this)">Regenerate from CAD Objects</button>
+            <button id="stackJsonBtn" class="secondary" onclick="downloadStackJson(this)">Export Stack JSON</button>
+            <button id="stackSheetBtn" class="secondary" onclick="downloadBuildSheet(this)">Export Build Sheet</button>
             <table><tbody id="stackSummary"></tbody></table>
           </div>
         </div>
@@ -934,7 +934,7 @@ def home() -> str:
                 <option>STL recipe</option>
                 <option>Mandrel G-code</option>
               </select>
-              <button onclick="downloadCadScript(this)">Export</button>
+              <button id="cadExportBtn" onclick="downloadCadScript(this)">Export</button>
             </div>
           </div>
           <div class="inspector-panel">
@@ -2809,42 +2809,29 @@ method = "${document.getElementById('method').value}"`
       bindClickById('tapeTab', () => showView('tape'));
       bindClickById('stackTab', () => showView('stack'));
       bindClickById('cad3dTab', () => showView('cad3d'));
-
-      document.querySelectorAll('button').forEach(button => {
-        const label = button.textContent.trim();
-        if (button.dataset.bound === '1') return;
-        const actions = {
-          'Analyze Shaft': () => run(button),
-          'Export JSON': () => downloadJson(button),
-          'Export G-Code': () => downloadGcode(button),
-          'Generate Shaft Target': () => runFitToBuild(button),
-          'Apply to CAD': () => applyFitToCad(button),
-          'Export Fit Profile': () => downloadFitProfile(button),
-          'Add Flag': () => addFlag(button),
-          'Add Triangle': () => addTriangleFlag(button),
-          'Reset Flags': () => resetFlags(button),
-          'Export Flag JSON': () => downloadFlagJson(button),
-          'Export Flag SVG': () => downloadFlagSvg(button),
-          'Export DXF': () => downloadFlagDxf(button),
-          'Save Project': () => downloadProject(button),
-          'Add Tape Strip': () => addTape(button),
-          'Add +/-45 Pair': () => addBiasTapePair(button),
-          'Reset TapeCAD': () => resetTapes(button),
-          'Export Tape JSON': () => downloadTapeJson(button),
-          'Regenerate from CAD Objects': () => regenerateStack(button),
-          'Export Stack JSON': () => downloadStackJson(button),
-          'Export Build Sheet': () => downloadBuildSheet(button),
-          'Export': () => downloadCadScript(button)
-        };
-        if (!actions[label]) return;
-        button.dataset.bound = '1';
-        button.onclick = null;
-        button.addEventListener('click', event => {
-          event.preventDefault();
-          safeInvoke(label, actions[label]);
-        });
-      });
-      writeCadConsole('Button safety bootstrap active.');
+      bindClickById('analyzeBtn', button => run(button));
+      bindClickById('exportJsonBtn', button => downloadJson(button));
+      bindClickById('exportGcodeBtn', button => downloadGcode(button));
+      bindClickById('fitGenerateBtn', button => runFitToBuild(button));
+      bindClickById('fitApplyBtn', button => applyFitToCad(button));
+      bindClickById('fitExportBtn', button => downloadFitProfile(button));
+      bindClickById('flagAddBtn', button => addFlag(button));
+      bindClickById('flagTriangleBtn', button => addTriangleFlag(button));
+      bindClickById('flagResetBtn', button => resetFlags(button));
+      bindClickById('flagJsonBtn', button => downloadFlagJson(button));
+      bindClickById('flagSvgBtn', button => downloadFlagSvg(button));
+      bindClickById('flagDxfBtn', button => downloadFlagDxf(button));
+      bindClickById('projectSaveBtn', button => downloadProject(button));
+      bindClickById('projectLoadBtn', () => document.getElementById('projectFile').click());
+      bindClickById('tapeAddBtn', button => addTape(button));
+      bindClickById('tapeBiasBtn', button => addBiasTapePair(button));
+      bindClickById('tapeResetBtn', button => resetTapes(button));
+      bindClickById('tapeJsonBtn', button => downloadTapeJson(button));
+      bindClickById('stackGenerateBtn', button => regenerateStack(button));
+      bindClickById('stackJsonBtn', button => downloadStackJson(button));
+      bindClickById('stackSheetBtn', button => downloadBuildSheet(button));
+      bindClickById('cadExportBtn', button => downloadCadScript(button));
+      writeCadConsole('Button safety bootstrap active: id bindings loaded.');
     }
 
     window.showView = showView;
