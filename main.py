@@ -1781,7 +1781,7 @@ ${y2.toFixed(3)}
         }
       });
       lines.push('0', 'ENDSEC', '0', 'EOF');
-      return lines.join('\n');
+      return lines.join('\\n');
     }
 
     function downloadFlagDxf(button) {
@@ -2330,7 +2330,7 @@ ${y2.toFixed(3)}
         lines.push(`   Type: ${layer.type} | Station: ${layer.station} | Angle: ${layer.angle} | Mass: ${Number(layer.mass_g).toFixed(2)} g`);
         lines.push(`   Instruction: ${layer.instruction}`);
       });
-      return lines.join('\n');
+      return lines.join('\\n');
     }
 
     function downloadBuildSheet(button) {
@@ -2762,7 +2762,7 @@ method = "${document.getElementById('method').value}"`
         content = cadQueryStepRecipe();
         filename = 'shaft-step-recipe.py';
       } else if (exportType === 'STL recipe') {
-        content = '# STL preview recipe\n# Lower fidelity visual check export for shaft envelope.\n\n' + shaftCadScript();
+        content = '# STL preview recipe\\n# Lower fidelity visual check export for shaft envelope.\\n\\n' + shaftCadScript();
         filename = 'shaft-stl-recipe.py';
       } else if (exportType === 'Mandrel G-code') {
         content = latest ? latest.gcode : document.getElementById('gcode').textContent;
