@@ -416,9 +416,14 @@ def home() -> str:
     th { color: #50615e; font-size: 13px; }
     canvas { width: 100%; height: 230px; border: 1px solid #cbd8d5; border-radius: 6px; margin-top: 10px; background: white; }
     .drawing-canvas { height: 420px; background: #101918; border-color: #344642; }
+    .flag-canvas { height: 520px; background: #101918; border-color: #344642; }
     .cad-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
     .cad-chip { background: #17211f; color: #d7fff6; padding: 10px; border-radius: 6px; font-size: 13px; }
     .cad-chip strong { display: block; color: white; font-size: 18px; margin-top: 4px; }
+    .tool-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+    .tool-row button { margin-top: 0; }
+    .editable-table input { margin: 0; padding: 6px; font-size: 13px; }
+    .editable-table button { margin: 0; padding: 6px; }
     pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; max-height: 300px; overflow: auto; }
     @media (max-width: 900px) { main, .grid2 { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } }
   </style>
@@ -494,6 +499,7 @@ def home() -> str:
         <div class="tabs">
           <button class="tab active" id="simTab" onclick="showView('simulation')">Simulation</button>
           <button class="tab" id="drawTab" onclick="showView('drawing')">Design / Drawing</button>
+          <button class="tab" id="flagTab" onclick="showView('flags')">Flag CAD</button>
         </div>
       </div>
       <div id="simulationView" class="view">
@@ -541,22 +547,67 @@ def home() -> str:
           </div>
         </div>
       </div>
+      <div id="flagView" class="view hidden">
+        <div class="cad-strip">
+          <div class="cad-chip">Flags<strong id="flagCount">-</strong></div>
+          <div class="cad-chip">Total Area<strong id="flagArea">-</strong></div>
+          <div class="cad-chip">Longest Flag<strong id="flagLongest">-</strong></div>
+          <div class="cad-chip">Export<strong>SVG</strong></div>
+        </div>
+        <h3>Prepreg Flag Drawing Board</h3>
+        <canvas class="flag-canvas" id="flagCanvas" width="1200" height="520"></canvas>
+        <div class="tool-row">
+          <button onclick="addFlag(this)">Add Flag</button>
+          <button class="secondary" onclick="resetFlags(this)">Reset Flags</button>
+          <button class="secondary" onclick="downloadFlagJson(this)">Export Flag JSON</button>
+          <button class="secondary" onclick="downloadFlagSvg(this)">Export Flag SVG</button>
+        </div>
+        <h3>Editable Flag Dimensions</h3>
+        <table class="editable-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Length mm</th>
+              <th>Root width mm</th>
+              <th>Tip width mm</th>
+              <th>Fiber angle</th>
+              <th>Station</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="flagRows"></tbody>
+        </table>
+      </div>
     </section>
   </main>
   <script>
     let latest = null;
+    let flags = defaultFlags();
+
+    function defaultFlags() {
+      return [
+        {name: 'Butt 0deg', length: 420, root: 92, tip: 74, angle: 0, station: 'Butt'},
+        {name: 'Bias +45', length: 360, root: 78, tip: 58, angle: 45, station: 'Mid'},
+        {name: 'Bias -45', length: 360, root: 78, tip: 58, angle: -45, station: 'Mid'},
+        {name: 'Tip 0deg', length: 300, root: 55, tip: 36, angle: 0, station: 'Tip'}
+      ];
+    }
 
     function showView(viewName) {
       const simulation = document.getElementById('simulationView');
       const drawing = document.getElementById('drawingView');
+      const flagView = document.getElementById('flagView');
       const simTab = document.getElementById('simTab');
       const drawTab = document.getElementById('drawTab');
-      const showDrawing = viewName === 'drawing';
-      simulation.classList.toggle('hidden', showDrawing);
-      drawing.classList.toggle('hidden', !showDrawing);
-      simTab.classList.toggle('active', !showDrawing);
-      drawTab.classList.toggle('active', showDrawing);
-      if (showDrawing && latest) drawDesign(latest);
+      const flagTab = document.getElementById('flagTab');
+      simulation.classList.toggle('hidden', viewName !== 'simulation');
+      drawing.classList.toggle('hidden', viewName !== 'drawing');
+      flagView.classList.toggle('hidden', viewName !== 'flags');
+      simTab.classList.toggle('active', viewName === 'simulation');
+      drawTab.classList.toggle('active', viewName === 'drawing');
+      flagTab.classList.toggle('active', viewName === 'flags');
+      if (viewName === 'drawing' && latest) drawDesign(latest);
+      if (viewName === 'flags') renderFlagEditor();
     }
 
     function flashButton(button, label) {
@@ -626,6 +677,7 @@ def home() -> str:
 
       drawChart(latest.zone_profile);
       drawDesign(latest);
+      renderFlagEditor();
     }
 
     function drawChart(profile) {
@@ -742,6 +794,162 @@ def home() -> str:
       document.getElementById('segmentSchedule').innerHTML = data.ei_profile.map(
         row => `<tr><td>${row.segment}</td><td>${row.outer_diameter_mm.toFixed(1)} mm</td><td>${row.ei_nm2.toExponential(2)}</td></tr>`
       ).join('');
+    }
+
+    function renderFlagEditor() {
+      document.getElementById('flagRows').innerHTML = flags.map((flag, index) => `
+        <tr>
+          <td><input value="${flag.name}" onchange="updateFlag(${index}, 'name', this.value)"></td>
+          <td><input type="number" value="${flag.length}" step="1" onchange="updateFlag(${index}, 'length', this.value)"></td>
+          <td><input type="number" value="${flag.root}" step="1" onchange="updateFlag(${index}, 'root', this.value)"></td>
+          <td><input type="number" value="${flag.tip}" step="1" onchange="updateFlag(${index}, 'tip', this.value)"></td>
+          <td><input type="number" value="${flag.angle}" step="1" onchange="updateFlag(${index}, 'angle', this.value)"></td>
+          <td><input value="${flag.station}" onchange="updateFlag(${index}, 'station', this.value)"></td>
+          <td><button class="secondary" onclick="deleteFlag(${index}, this)">Delete</button></td>
+        </tr>
+      `).join('');
+      drawFlags();
+    }
+
+    function updateFlag(index, key, value) {
+      if (['length', 'root', 'tip', 'angle'].includes(key)) {
+        flags[index][key] = Number(value);
+      } else {
+        flags[index][key] = value;
+      }
+      drawFlags();
+    }
+
+    function addFlag(button) {
+      flashButton(button, 'Added');
+      flags.push({name: 'New flag', length: 320, root: 70, tip: 48, angle: 0, station: 'Custom'});
+      renderFlagEditor();
+    }
+
+    function deleteFlag(index, button) {
+      flashButton(button, 'Deleted');
+      flags.splice(index, 1);
+      renderFlagEditor();
+    }
+
+    function resetFlags(button) {
+      flashButton(button, 'Reset');
+      flags = defaultFlags();
+      renderFlagEditor();
+    }
+
+    function flagPoints(flag, x, y, scale) {
+      const length = flag.length * scale;
+      const root = flag.root * scale;
+      const tip = flag.tip * scale;
+      return [
+        [x, y - root / 2],
+        [x + length, y - tip / 2],
+        [x + length, y + tip / 2],
+        [x, y + root / 2]
+      ];
+    }
+
+    function drawDimension(ctx, x1, y1, x2, y2, label) {
+      ctx.strokeStyle = '#f2b84b';
+      ctx.fillStyle = '#f2b84b';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x1, y1 - 5); ctx.lineTo(x1, y1 + 5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x2, y2 - 5); ctx.lineTo(x2, y2 + 5); ctx.stroke();
+      ctx.fillText(label, (x1 + x2) / 2 - 22, y1 - 8);
+    }
+
+    function drawFlags() {
+      const canvas = document.getElementById('flagCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#101918';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#263b37';
+      for (let x = 40; x < canvas.width; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 30); ctx.lineTo(x, canvas.height - 35); ctx.stroke();
+      }
+      for (let y = 40; y < canvas.height; y += 40) {
+        ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(canvas.width - 30, y); ctx.stroke();
+      }
+
+      const maxLength = Math.max(...flags.map(f => f.length), 1);
+      const scale = Math.min(1.8, (canvas.width - 180) / maxLength);
+      const rowGap = Math.max(78, (canvas.height - 90) / Math.max(flags.length, 1));
+      ctx.font = '13px Arial';
+      flags.forEach((flag, index) => {
+        const y = 72 + index * rowGap;
+        const x = 100;
+        const points = flagPoints(flag, x, y, scale);
+        ctx.beginPath();
+        points.forEach((p, i) => {
+          if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+        });
+        ctx.closePath();
+        ctx.fillStyle = index % 2 === 0 ? '#d7fff6' : '#b8e9ff';
+        ctx.globalAlpha = 0.82;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#35c7b2';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.strokeStyle = '#ff6f61';
+        ctx.beginPath();
+        ctx.moveTo(x + 20, y);
+        ctx.lineTo(x + Math.cos(flag.angle * Math.PI / 180) * 78, y + Math.sin(flag.angle * Math.PI / 180) * 78);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`${flag.name} | ${flag.station} | ${flag.angle} deg`, x, y - flag.root * scale / 2 - 16);
+        drawDimension(ctx, x, y + flag.root * scale / 2 + 18, x + flag.length * scale, y + flag.root * scale / 2 + 18, `${flag.length} mm`);
+        ctx.fillStyle = '#f2b84b';
+        ctx.fillText(`Root ${flag.root} mm`, x - 82, y);
+        ctx.fillText(`Tip ${flag.tip} mm`, x + flag.length * scale + 14, y);
+      });
+
+      const totalArea = flags.reduce((sum, f) => sum + ((f.root + f.tip) / 2) * f.length, 0);
+      const longest = Math.max(...flags.map(f => f.length), 0);
+      document.getElementById('flagCount').textContent = String(flags.length);
+      document.getElementById('flagArea').textContent = Math.round(totalArea).toLocaleString() + ' mm2';
+      document.getElementById('flagLongest').textContent = longest + ' mm';
+    }
+
+    function flagSvgText() {
+      const width = 1200;
+      const rowGap = 120;
+      const height = Math.max(220, 90 + flags.length * rowGap);
+      const scale = 1.5;
+      const shapes = flags.map((flag, index) => {
+        const x = 80;
+        const y = 70 + index * rowGap;
+        const pts = flagPoints(flag, x, y, scale).map(p => p.join(',')).join(' ');
+        return `<polygon points="${pts}" fill="none" stroke="#111" stroke-width="2"/><text x="${x}" y="${y - flag.root * scale / 2 - 10}" font-size="14">${flag.name} ${flag.length}mm root ${flag.root}mm tip ${flag.tip}mm ${flag.angle}deg</text>`;
+      }).join('');
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${shapes}</svg>`;
+    }
+
+    function downloadFlagJson(button) {
+      flashButton(button, 'Exported');
+      const blob = new Blob([JSON.stringify({flags}, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-flag-dimensions.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadFlagSvg(button) {
+      flashButton(button, 'Exported');
+      const blob = new Blob([flagSvgText()], {type: 'image/svg+xml'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-flag-drawing.svg';
+      a.click();
+      URL.revokeObjectURL(url);
     }
 
     function downloadJson(button) {
