@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from math import cos, degrees, log10, pi, radians, sin, sqrt
 from typing import Any
 
@@ -9,6 +11,9 @@ from fastapi import Response
 from fastapi.responses import HTMLResponse
 
 app = FastAPI(title="AE ShaftCAD Studio", version="1.1")
+APP_VERSION = "1.2"
+APP_BUILD_TIME = datetime.now(timezone.utc).isoformat()
+APP_BUILD_COMMIT = os.getenv("RENDER_GIT_COMMIT", "local-dev")
 
 
 @dataclass
@@ -617,6 +622,11 @@ def home() -> str:
     .build-badge { border: 1px solid #4e7f76; color: #d7fff6; padding: 7px 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
     .app-status { background: #d7fff6; color: #17211f; border-bottom: 1px solid #9fc8c0; padding: 8px 18px; font-size: 13px; font-weight: 800; }
     .app-status.bad { background: #ffe1df; color: #8a1f16; border-color: #df9b95; }
+    .build-fingerprint { background: #ffffff; border-bottom: 1px solid #d6e2df; padding: 8px 18px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+    .build-fingerprint code { background: #eef5f3; padding: 2px 6px; border-radius: 4px; }
+    .build-fingerprint .fp-ok { color: #0f7a4f; font-weight: 700; }
+    .build-fingerprint .fp-bad { color: #a5261e; font-weight: 700; }
+    .build-fingerprint button { width: auto; margin: 0; padding: 5px 9px; font-size: 12px; }
     .viewer-note { color: #8a4d00; font-weight: 700; margin-left: 8px; }
     main { display: grid; grid-template-columns: 340px 1fr; gap: 0; min-height: calc(100vh - 111px); }
     section { background: #f8fbfa; border-right: 1px solid #b9c8c4; padding: 16px; }
@@ -733,6 +743,13 @@ def home() -> str:
     <div class="build-badge">Prototype CAD kernel: shaft-native</div>
   </header>
   <div id="appStatus" class="app-status">AE boot check: HTML loaded. JavaScript has not confirmed yet.</div>
+  <div class="build-fingerprint">
+    <span>Version <code id="fpVersion">-</code></span>
+    <span>Commit <code id="fpCommit">-</code></span>
+    <span>Built <code id="fpBuilt">-</code></span>
+    <span>Smoke <strong id="fpSmoke" class="fp-ok">Pending</strong></span>
+    <button id="fpSmokeBtn" class="secondary">Run Smoke Test</button>
+  </div>
   <main>
     <section>
       <h2>Design Inputs</h2>
@@ -1315,6 +1332,45 @@ def home() -> str:
         objects: ['Inner braid', 'UD tape strip', 'Bias tape strip', 'Outer braid', 'Layer index']
       }
     };
+
+    async function loadBuildFingerprint() {
+      try {
+        const res = await fetch('/api/build');
+        if (!res.ok) throw new Error(`build api ${res.status}`);
+        const meta = await res.json();
+        const ver = document.getElementById('fpVersion');
+        const commit = document.getElementById('fpCommit');
+        const built = document.getElementById('fpBuilt');
+        if (ver) ver.textContent = meta.version || '-';
+        if (commit) commit.textContent = (meta.commit || '-').slice(0, 12);
+        if (built) built.textContent = meta.build_time || '-';
+      } catch (error) {
+        writeCadConsole(`Build fingerprint load failed: ${error.message || String(error)}`);
+      }
+    }
+
+    function runSmokeTest(button) {
+      const smoke = document.getElementById('fpSmoke');
+      const checks = [
+        typeof run === 'function',
+        typeof drawCad3d === 'function',
+        typeof cad3dMouseDown === 'function',
+        typeof setCadDraftTool === 'function',
+        typeof runButtonAudit === 'function',
+        Boolean(document.getElementById('cad3dCanvas')),
+        Boolean(document.getElementById('fpSmokeBtn'))
+      ];
+      const ok = checks.every(Boolean);
+      if (smoke) {
+        smoke.textContent = ok ? 'PASS' : 'FAIL';
+        smoke.classList.toggle('fp-ok', ok);
+        smoke.classList.toggle('fp-bad', !ok);
+      }
+      setAppStatus(ok ? 'Smoke test passed: core CAD wiring healthy.' : 'Smoke test failed: check console for missing bindings.', !ok);
+      writeCadConsole(`Smoke test ${ok ? 'PASS' : 'FAIL'} (${checks.filter(Boolean).length}/${checks.length})`);
+      if (button) flashButton(button, ok ? 'PASS' : 'FAIL');
+      return ok;
+    }
 
     function setAppStatus(message, isBad) {
       const status = document.getElementById('appStatus');
@@ -4417,6 +4473,7 @@ method = "${document.getElementById('method').value}"`
         cadPresetLightBtn: button => setCadPreset('light', button),
         cadPresetInspectBtn: button => setCadPreset('inspect', button),
         cadSyncScriptBtn: button => syncCadScript(button),
+        fpSmokeBtn: button => runSmokeTest(button),
         cadDraftSelectBtn: button => setCadDraftTool('select', button),
         cadDraftLineBtn: button => setCadDraftTool('line', button),
         cadDraftRectBtn: button => setCadDraftTool('rect', button),
@@ -4561,6 +4618,7 @@ method = "${document.getElementById('method').value}"`
     window.updateArchitecturePanel = updateArchitecturePanel;
     window.drawCad3d = drawCad3d;
     window.setCadDraftTool = setCadDraftTool;
+    window.runSmokeTest = runSmokeTest;
     window.cad3dMouseDown = cad3dMouseDown;
     window.cad3dMouseMove = cad3dMouseMove;
     window.cad3dMouseUp = cad3dMouseUp;
@@ -4579,6 +4637,7 @@ method = "${document.getElementById('method').value}"`
 
     function bootApp() {
       setAppStatus('AE boot starting: wiring controls and running first analysis...');
+      loadBuildFingerprint();
       renderDebugHealth();
       applyViewerMode();
       bootstrapButtons();
@@ -4606,6 +4665,15 @@ method = "${document.getElementById('method').value}"`
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/build")
+def api_build() -> dict[str, str]:
+    return {
+        "version": APP_VERSION,
+        "commit": APP_BUILD_COMMIT,
+        "build_time": APP_BUILD_TIME,
+    }
 
 
 @app.get("/favicon.ico")
