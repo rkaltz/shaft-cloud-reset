@@ -1,0 +1,3 @@
+Direct GitHub write check from Albert.
+Timestamp: 2026-05-05
+If this file appears, direct connector writes are working.
