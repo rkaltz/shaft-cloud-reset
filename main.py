@@ -1301,6 +1301,10 @@ def home() -> str:
     let designFuture = [];
     let activeDrag = null;
     let selectedFlagIndex = null;
+    let selectedFlagEdge = null;
+    let sketchLines = [];
+    let sketchLineStart = null;
+    let sketchLinePreview = null;
     let sketchTool = 'select';
     let latestFitProfile = null;
     let fitCadBridge = null;
@@ -1705,10 +1709,24 @@ def home() -> str:
         const v = flagConstraints.find(c => c.id === `flag_${index}_vertical` && c.enabled);
         const a = flagConstraints.find(c => c.id === `flag_${index}_angle` && c.enabled);
         const l = flagConstraints.find(c => c.id === `flag_${index}_length` && c.enabled);
+        const eTopH = flagConstraints.find(c => c.id === `flag_${index}_edge_top_horizontal` && c.enabled);
+        const eTopV = flagConstraints.find(c => c.id === `flag_${index}_edge_top_vertical` && c.enabled);
+        const eBottomH = flagConstraints.find(c => c.id === `flag_${index}_edge_bottom_horizontal` && c.enabled);
+        const eBottomV = flagConstraints.find(c => c.id === `flag_${index}_edge_bottom_vertical` && c.enabled);
+        const eLeftH = flagConstraints.find(c => c.id === `flag_${index}_edge_left_horizontal` && c.enabled);
+        const eRightH = flagConstraints.find(c => c.id === `flag_${index}_edge_right_horizontal` && c.enabled);
+        const eLeftV = flagConstraints.find(c => c.id === `flag_${index}_edge_left_vertical` && c.enabled);
+        const eRightV = flagConstraints.find(c => c.id === `flag_${index}_edge_right_vertical` && c.enabled);
 
         if (h && v) errors.push(`${name}: over-constrained (horizontal + vertical both active).`);
         if (h && a) errors.push(`${name}: over-constrained (horizontal conflicts with explicit angle).`);
         if (l && numberOr(l.value, 0) <= 0) errors.push(`${name}: explicit length must be > 0.`);
+        if (eTopH && eTopV) errors.push(`${name}: top edge over-constrained (horizontal + vertical).`);
+        if (eBottomH && eBottomV) errors.push(`${name}: bottom edge over-constrained (horizontal + vertical).`);
+        if (eLeftH && eLeftV) errors.push(`${name}: left edge over-constrained (horizontal + vertical).`);
+        if (eRightH && eRightV) errors.push(`${name}: right edge over-constrained (horizontal + vertical).`);
+        if (eTopV || eBottomV) errors.push(`${name}: impossible taper (top/bottom edge cannot be vertical in this flag model).`);
+        if (eLeftH || eRightH) errors.push(`${name}: impossible taper (left/right edge cannot be horizontal in this flag model).`);
       });
 
       flagConstraints.forEach(constraint => {
@@ -1720,6 +1738,32 @@ def home() -> str:
           }
         }
       });
+
+      // SolveSpace-style sketch entities (2D line command) on top of flag workspace
+      if (sketchLines.length) {
+        ctx.save();
+        ctx.strokeStyle = '#78e3ff';
+        ctx.lineWidth = 2;
+        sketchLines.forEach(line => {
+          ctx.beginPath();
+          ctx.moveTo(line.start.x, line.start.y);
+          ctx.lineTo(line.end.x, line.end.y);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+      if (sketchLinePreview) {
+        ctx.save();
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = '#ff4fa8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sketchLinePreview.start.x, sketchLinePreview.start.y);
+        ctx.lineTo(sketchLinePreview.end.x, sketchLinePreview.end.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
       return { errors, warnings };
     }
 
@@ -1794,32 +1838,54 @@ def home() -> str:
       const flag = flags[selectedFlagIndex];
       const value = selectedConstraintValue();
       let conflictNote = '';
+      const edge = Number.isInteger(selectedFlagEdge) ? edgeName(selectedFlagEdge) : null;
+
+      function upsertEdge(kind, rawValue) {
+        if (!edge) return;
+        const id = `flag_${selectedFlagIndex}_edge_${edge}_${kind}`;
+        const scope = `${flag.name} ${edge} edge`;
+        const existing = flagConstraints.find(c => c.id === id);
+        if (existing) {
+          existing.value = numberOr(rawValue, existing.value);
+          existing.enabled = true;
+          existing.scope = scope;
+        } else {
+          flagConstraints.push({ id, type: `edge_${kind}`, scope, value: numberOr(rawValue, 0), enabled: true });
+        }
+      }
 
       if (type === 'horizontal') {
         if (clearFlagConstraintByType(selectedFlagIndex, 'angle')) {
           conflictNote = 'Angle constraint disabled due to horizontal lock.';
         }
         upsertFlagConstraint(selectedFlagIndex, 'horizontal', 1, true, `${flag.name} horizontal`);
+        upsertEdge('horizontal', 1);
       } else if (type === 'vertical') {
         upsertFlagConstraint(selectedFlagIndex, 'vertical', 1, true, `${flag.name} vertical`);
+        upsertEdge('vertical', 1);
       } else if (type === 'length') {
         if (value <= 0) {
           setAppStatus('Length constraint must be greater than 0.', true);
           return;
         }
         upsertFlagConstraint(selectedFlagIndex, 'length', value, true, `${flag.name} length`);
+        upsertEdge('length', value);
       } else if (type === 'angle') {
         const clamped = Math.max(-89, Math.min(89, value));
         if (clearFlagConstraintByType(selectedFlagIndex, 'horizontal')) {
           conflictNote = 'Horizontal constraint disabled due to explicit angle.';
         }
         upsertFlagConstraint(selectedFlagIndex, 'angle', clamped, true, `${flag.name} angle`);
+        upsertEdge('angle', clamped);
       }
 
       if (conflictNote) writeCadConsole(conflictNote);
       applyFlagConstraints();
       renderConstraintTable();
       drawFlags();
+      if (edge) {
+        setAppStatus(`Applied ${type} constraint to ${flag.name} (${edge} edge).`);
+      }
     }
 
     function applyFlagConstraints(button) {
@@ -1873,6 +1939,52 @@ def home() -> str:
             next.length = lenTarget;
             adjustments++;
           }
+        }
+        const edgeHorizontal = flagConstraints.find(c => c.id === `flag_${index}_edge_top_horizontal` && c.enabled);
+        if (edgeHorizontal) {
+          if (Math.abs(next.tip - next.root) > 0.001) adjustments++;
+          next.tip = next.root;
+        }
+        const edgeBottomHorizontal = flagConstraints.find(c => c.id === `flag_${index}_edge_bottom_horizontal` && c.enabled);
+        if (edgeBottomHorizontal) {
+          if (Math.abs(next.tip - next.root) > 0.001) adjustments++;
+          next.tip = next.root;
+        }
+        const edgeLeftLength = flagConstraints.find(c => c.id === `flag_${index}_edge_left_length` && c.enabled);
+        if (edgeLeftLength) {
+          const target = Math.max(8, numberOr(edgeLeftLength.value, next.root));
+          if (Math.abs(next.root - target) > 0.001) adjustments++;
+          next.root = target;
+        }
+        const edgeRightLength = flagConstraints.find(c => c.id === `flag_${index}_edge_right_length` && c.enabled);
+        if (edgeRightLength) {
+          const target = Math.max(4, numberOr(edgeRightLength.value, next.tip));
+          if (Math.abs(next.tip - target) > 0.001) adjustments++;
+          next.tip = target;
+        }
+        const edgeTopLength = flagConstraints.find(c => c.id === `flag_${index}_edge_top_length` && c.enabled);
+        if (edgeTopLength) {
+          const target = Math.max(60, numberOr(edgeTopLength.value, next.length));
+          if (Math.abs(next.length - target) > 0.001) adjustments++;
+          next.length = target;
+        }
+        const edgeBottomLength = flagConstraints.find(c => c.id === `flag_${index}_edge_bottom_length` && c.enabled);
+        if (edgeBottomLength) {
+          const target = Math.max(60, numberOr(edgeBottomLength.value, next.length));
+          if (Math.abs(next.length - target) > 0.001) adjustments++;
+          next.length = target;
+        }
+        const edgeTopAngle = flagConstraints.find(c => c.id === `flag_${index}_edge_top_angle` && c.enabled);
+        if (edgeTopAngle) {
+          const target = Math.max(-89, Math.min(89, numberOr(edgeTopAngle.value, next.angle)));
+          if (Math.abs(next.angle - target) > 0.001) adjustments++;
+          next.angle = target;
+        }
+        const edgeBottomAngle = flagConstraints.find(c => c.id === `flag_${index}_edge_bottom_angle` && c.enabled);
+        if (edgeBottomAngle) {
+          const target = Math.max(-89, Math.min(89, numberOr(edgeBottomAngle.value, next.angle)));
+          if (Math.abs(next.angle - target) > 0.001) adjustments++;
+          next.angle = target;
         }
         if (biasAbs && next.layer.toLowerCase().includes('bias')) {
           const target = Math.abs(biasAbs.value);
@@ -1943,6 +2055,12 @@ def home() -> str:
     function setSketchTool(tool, button) {
       if (isViewerMode()) return;
       sketchTool = tool;
+      if (tool !== 'line') {
+        sketchLineStart = null;
+        sketchLinePreview = null;
+      } else {
+        setAppStatus('LINE mode active: click first point.');
+      }
       document.querySelectorAll('.cad-tool, .sketch-icon').forEach(item => item.classList.remove('active'));
       if (button) button.classList.add('active');
       drawFlags();
@@ -2809,6 +2927,25 @@ def home() -> str:
       return Math.hypot(a.x - b[0], a.y - b[1]);
     }
 
+    function pointToSegmentDistance(point, a, b) {
+      const vx = b[0] - a[0];
+      const vy = b[1] - a[1];
+      const wx = point.x - a[0];
+      const wy = point.y - a[1];
+      const c1 = vx * wx + vy * wy;
+      if (c1 <= 0) return Math.hypot(point.x - a[0], point.y - a[1]);
+      const c2 = vx * vx + vy * vy;
+      if (c2 <= c1) return Math.hypot(point.x - b[0], point.y - b[1]);
+      const t = c1 / c2;
+      const px = a[0] + t * vx;
+      const py = a[1] + t * vy;
+      return Math.hypot(point.x - px, point.y - py);
+    }
+
+    function edgeName(edgeIndex) {
+      return ['top', 'right', 'bottom', 'left'][edgeIndex] || 'edge';
+    }
+
     function snapValue(value) {
       const snap = document.getElementById('snapGrid');
       return snap && snap.checked ? Math.round(value / 5) * 5 : value;
@@ -2817,6 +2954,27 @@ def home() -> str:
     function flagMouseDown(event) {
       if (isViewerMode()) return;
       const point = canvasPoint(event);
+      if (sketchTool === 'line') {
+        if (!sketchLineStart) {
+          sketchLineStart = { x: point.x, y: point.y };
+          sketchLinePreview = { start: { ...sketchLineStart }, end: { x: point.x, y: point.y } };
+          setAppStatus('LINE: pick second point.');
+          drawFlags();
+          return;
+        }
+        const endPoint = { x: point.x, y: point.y };
+        sketchLines.push({
+          id: `ln_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          start: { ...sketchLineStart },
+          end: endPoint
+        });
+        sketchLineStart = null;
+        sketchLinePreview = null;
+        designHistoryCommit('sketch line added');
+        setAppStatus('LINE committed.');
+        drawFlags();
+        return;
+      }
       let dimBest = null;
       dimensionHandles.forEach(handle => {
         const d = Math.hypot(point.x - handle.x, point.y - handle.y);
@@ -2841,17 +2999,44 @@ def home() -> str:
       });
       if (best) {
         selectedFlagIndex = best.flagIndex;
+        selectedFlagEdge = null;
         activeDrag = { kind: 'corner', ...best };
         drawFlags();
         return;
       }
+      let bestEdge = null;
+      flagGeometry.forEach((geometry, flagIndex) => {
+        const pts = geometry.points;
+        for (let edgeIndex = 0; edgeIndex < 4; edgeIndex++) {
+          const a = pts[edgeIndex];
+          const b = pts[(edgeIndex + 1) % 4];
+          const d = pointToSegmentDistance(point, a, b);
+          if (d < 10 && (!bestEdge || d < bestEdge.distance)) {
+            bestEdge = { flagIndex, edgeIndex, distance: d };
+          }
+        }
+      });
+      if (bestEdge) {
+        selectedFlagIndex = bestEdge.flagIndex;
+        selectedFlagEdge = bestEdge.edgeIndex;
+        activeDrag = null;
+        drawFlags();
+        return;
+      }
       selectedFlagIndex = null;
+      selectedFlagEdge = null;
       activeDrag = null;
       drawFlags();
     }
 
     function flagMouseMove(event) {
       if (isViewerMode()) return;
+      if (sketchTool === 'line' && sketchLineStart) {
+        const point = canvasPoint(event);
+        sketchLinePreview = { start: { ...sketchLineStart }, end: { x: point.x, y: point.y } };
+        drawFlags();
+        return;
+      }
       if (!activeDrag) return;
       const point = canvasPoint(event);
       const geometry = flagGeometry[activeDrag.flagIndex];
@@ -2859,6 +3044,7 @@ def home() -> str:
       const flag = flags[activeDrag.flagIndex];
       if (document.getElementById('lockDimensions').checked || flag.locked) return;
       if (activeDrag.kind === 'dimension') {
+        selectedFlagEdge = null;
         if (activeDrag.dimension === 'length') {
           flag.length = Math.max(60, snapValue((point.x - geometry.x) / geometry.scale));
         } else if (activeDrag.dimension === 'root') {
@@ -2873,6 +3059,7 @@ def home() -> str:
       }
       const localX = Math.max(40, point.x - geometry.x);
       const localY = Math.abs(point.y - geometry.y);
+      selectedFlagEdge = null;
       if (activeDrag.cornerIndex === 1 || activeDrag.cornerIndex === 2) {
         flag.length = Math.max(60, snapValue(localX / geometry.scale));
         flag.tip = Math.max(8, snapValue((localY * 2) / geometry.scale));
@@ -3009,6 +3196,19 @@ def home() -> str:
           ctx.lineWidth = 3;
           ctx.stroke();
         }
+        if (selectedFlagIndex === index && Number.isInteger(selectedFlagEdge)) {
+          const a = points[selectedFlagEdge];
+          const b = points[(selectedFlagEdge + 1) % 4];
+          ctx.strokeStyle = '#ff2d20';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(a[0], a[1]);
+          ctx.lineTo(b[0], b[1]);
+          ctx.stroke();
+          ctx.fillStyle = '#ffdbd8';
+          ctx.font = '700 12px Arial';
+          ctx.fillText(`edge: ${edgeName(selectedFlagEdge)}`, (a[0] + b[0]) / 2 - 24, (a[1] + b[1]) / 2 - 10);
+        }
 
         points.forEach((p, cornerIndex) => {
           drawHandle(
@@ -3075,7 +3275,9 @@ def home() -> str:
       document.getElementById('flagArea').textContent = Math.round(totalArea).toLocaleString() + ' mm2';
       document.getElementById('flagLongest').textContent = longest + ' mm';
       document.getElementById('selectedFlagLabel').textContent =
-        selectedFlagIndex === null ? `Tool: ${sketchTool} | No flag selected` : `Tool: ${sketchTool} | Selected: ${flags[selectedFlagIndex].name}`;
+        selectedFlagIndex === null
+          ? `Tool: ${sketchTool}${sketchTool === 'line' && sketchLineStart ? ' | LINE: pick second point' : ''} | No flag selected`
+          : `Tool: ${sketchTool}${sketchTool === 'line' && sketchLineStart ? ' | LINE: pick second point' : ''} | Selected: ${flags[selectedFlagIndex].name}`;
       const hCount = flags.length;
       const vCount = flags.length * 2;
       const dimCount = flags.length * 3;
@@ -3085,7 +3287,7 @@ def home() -> str:
       if (sideSelection) {
         sideSelection.textContent = selectedFlagIndex === null
           ? `Tool: ${sketchTool}`
-          : `${flags[selectedFlagIndex].name} | L ${flags[selectedFlagIndex].length} | root ${flags[selectedFlagIndex].root} | tip ${flags[selectedFlagIndex].tip}`;
+          : `${flags[selectedFlagIndex].name} | L ${flags[selectedFlagIndex].length} | root ${flags[selectedFlagIndex].root} | tip ${flags[selectedFlagIndex].tip}${Number.isInteger(selectedFlagEdge) ? ` | edge ${edgeName(selectedFlagEdge)}` : ''}`;
       }
       updateValidationReadout();
     }
