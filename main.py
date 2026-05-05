@@ -5,6 +5,7 @@ from math import cos, degrees, log10, pi, radians, sin, sqrt
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi import Response
 from fastapi.responses import HTMLResponse
 
 app = FastAPI(title="AE ShaftCAD Studio", version="1.1")
@@ -129,6 +130,18 @@ ARCHITECTURE_MODES: dict[str, dict[str, Any]] = {
 ZONE_STATIONS_IN = [41, 36, 31, 26, 21, 16, 11]
 
 
+@dataclass
+class CpmCalibration:
+    clamp_length_in: float = 5.0
+    overall_weight_g: float = 205.0
+    profile_weight_g: float = 255.0
+    overall_k: float = 14.7
+    zone_k: float = 8.5
+
+
+DEFAULT_CPM_CAL = CpmCalibration()
+
+
 def default_segments(base_angle: float = 45.0, thickness_m: float = 0.000125) -> list[Segment]:
     layup = [
         Ply(0.0, thickness_m),
@@ -192,18 +205,26 @@ def shaft_mass_kg(segments: list[Segment], material: Material) -> float:
     )
 
 
-def overall_cpm(segments: list[Segment], material: Material, head_weight_g: float) -> float:
+def cpm_effective_length_m(total_length_m: float, clamp_length_in: float) -> float:
+    return max(0.08, total_length_m - clamp_length_in * 0.0254)
+
+
+def overall_cpm(segments: list[Segment], material: Material, calibration: CpmCalibration) -> float:
     length = total_length(segments)
+    effective_length = cpm_effective_length_m(length, calibration.clamp_length_in)
     ei = average_ei(segments, material)
-    return 14.7 * sqrt(ei / ((head_weight_g / 1000.0) * length**3))
+    return calibration.overall_k * sqrt(ei / ((calibration.overall_weight_g / 1000.0) * effective_length**3))
 
 
-def zone_profile(segments: list[Segment], material: Material, profile_weight_g: float = 255.0) -> list[dict[str, float]]:
+def zone_profile(segments: list[Segment], material: Material, calibration: CpmCalibration) -> list[dict[str, float]]:
     ei = average_ei(segments, material)
+    clamp = calibration.clamp_length_in
     return [
         {
             "station_in": float(station),
-            "cpm": 8.5 * sqrt(ei / ((profile_weight_g / 1000.0) * (station * 0.0254) ** 3)),
+            "effective_span_in": max(1.0, station - clamp),
+            "cpm": calibration.zone_k
+            * sqrt(ei / ((calibration.profile_weight_g / 1000.0) * (max(1.0, station - clamp) * 0.0254) ** 3)),
         }
         for station in ZONE_STATIONS_IN
     ]
@@ -265,6 +286,83 @@ def simulate_launch(cpm: float, head_speed_mph: float) -> dict[str, float]:
         "launch_angle_deg": launch_angle,
         "spin_rpm": spin_rpm,
         "carry_yards": carry_yards,
+    }
+
+
+def fit_target_from_swing(
+    speed_mph: float = 105.0,
+    launch_deg: float = 13.5,
+    spin_rpm: float = 2650.0,
+    weight_g: float = 65.0,
+    tempo: str = "Medium",
+    transition: str = "Medium",
+    release: str = "Mid",
+    miss: str = "Neutral",
+    feel: str = "Stable mid",
+) -> dict[str, Any]:
+    tempo_map = {"Smooth": -4.0, "Medium": 0.0, "Aggressive": 5.0}
+    transition_map = {"Smooth": -3.0, "Medium": 0.0, "Hard": 6.0}
+    release_map = {"Early": -3.0, "Mid": 0.0, "Late": 4.0}
+    feel_map = {"Softer load": -5.0, "Stable mid": 0.0, "Boardy/stout": 6.0}
+
+    target_cpm = 235.0 + speed_mph * 0.22
+    target_cpm += tempo_map.get(tempo, 0.0)
+    target_cpm += transition_map.get(transition, 0.0)
+    target_cpm += release_map.get(release, 0.0)
+    target_cpm += feel_map.get(feel, 0.0)
+    if miss == "Left":
+        target_cpm += 3.0
+    if miss == "Right":
+        target_cpm -= 2.0
+    if miss == "High spin":
+        target_cpm += 4.0
+    if miss == "Low launch":
+        target_cpm -= 4.0
+
+    torque_target = max(2.4, 4.2 - (target_cpm - 250.0) * 0.025 - (0.35 if transition == "Hard" else 0.0))
+    launch_bias = (
+        "lower launch / lower spin"
+        if launch_deg > 15.0 or spin_rpm > 3000.0
+        else "add launch / smoother tip"
+        if launch_deg < 11.0
+        else "neutral launch"
+    )
+    wrap_angle = max(28.0, min(58.0, 45.0 + (5.0 if transition == "Hard" else 0.0) + (4.0 if miss == "Left" else 0.0) - (5.0 if feel == "Softer load" else 0.0)))
+    tip_strategy = (
+        "stiffen tip section with bias/hoop support"
+        if "lower" in launch_bias
+        else "soften tip section and reduce hoop density"
+        if "add" in launch_bias
+        else "balanced tip stiffness"
+    )
+    profile = [
+        {"station": 41, "cpm": target_cpm - 18.0},
+        {"station": 36, "cpm": target_cpm - 10.0},
+        {"station": 31, "cpm": target_cpm - 3.0},
+        {"station": 26, "cpm": target_cpm + 2.0},
+        {"station": 21, "cpm": target_cpm + 8.0},
+        {"station": 16, "cpm": target_cpm + 15.0},
+        {"station": 11, "cpm": target_cpm + 24.0},
+    ]
+    return {
+        "target_cpm": target_cpm,
+        "target_weight_g": weight_g,
+        "torque_target_deg": torque_target,
+        "wrap_angle_deg": wrap_angle,
+        "launch_bias": launch_bias,
+        "tip_strategy": tip_strategy,
+        "zone_profile": profile,
+        "inputs": {
+            "speed": speed_mph,
+            "launch": launch_deg,
+            "spin": spin_rpm,
+            "weight": weight_g,
+            "tempo": tempo,
+            "transition": transition,
+            "release": release,
+            "miss": miss,
+            "feel": feel,
+        },
     }
 
 
@@ -405,16 +503,28 @@ def analyze_shaft(
     gcode_spindle_rpm: int = 1200,
     gcode_tool_number: int = 1,
     gcode_pass_count: int = 1,
+    cpm_clamp_length_in: float = 5.0,
+    cpm_overall_weight_g: float = 205.0,
+    cpm_profile_weight_g: float = 255.0,
+    cpm_overall_k: float = 14.7,
+    cpm_zone_k: float = 8.5,
 ) -> dict[str, Any]:
     material = MATERIALS.get(material_name, MATERIALS["Mitsubishi MR70"])
     method = MANUFACTURING_METHODS.get(method_key, MANUFACTURING_METHODS["roll_wrapped"])
     architecture = ARCHITECTURE_MODES.get(architecture_mode, ARCHITECTURE_MODES["flag_wrap"])
     segments = default_segments(base_angle=wrap_angle_deg)
-    cpm = overall_cpm(segments, material, head_weight_g)
+    calibration = CpmCalibration(
+        clamp_length_in=max(0.0, cpm_clamp_length_in),
+        overall_weight_g=max(1.0, cpm_overall_weight_g),
+        profile_weight_g=max(1.0, cpm_profile_weight_g),
+        overall_k=max(0.1, cpm_overall_k),
+        zone_k=max(0.1, cpm_zone_k),
+    )
+    cpm = overall_cpm(segments, material, calibration)
     mass = shaft_mass_kg(segments, material) * method["mass_factor"]
     cost = mass * material.cost_per_kg * method["cost_factor"]
     torsion = torsion_deg(segments, material, factor=method["torsion_factor"])
-    zones = zone_profile(segments, material)
+    zones = zone_profile(segments, material, calibration)
     fatigue = fatigue_cycles()
     return {
         "inputs": {
@@ -426,6 +536,7 @@ def analyze_shaft(
             "architecture_mode": architecture_mode,
             "head_speed_mph": head_speed_mph,
         },
+        "cpm_calibration": asdict(calibration),
         "gcode_settings": {
             "units": gcode_units,
             "rapid_feed": gcode_rapid_feed,
@@ -524,6 +635,9 @@ def home() -> str:
     button.clicked { background: #d9911f; color: #17211f; }
     .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .panel-title { margin-top: 18px; padding-top: 14px; border-top: 1px solid #dbe4e1; font-size: 16px; }
+    .debug-panel { margin-top: 14px; border: 1px solid #cbd8d5; border-radius: 6px; background: #ffffff; padding: 10px; }
+    .debug-panel h3 { margin: 0 0 8px; font-size: 14px; }
+    .debug-panel table { font-size: 12px; margin-top: 0; }
     .metrics { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }
     .card { background: #eef5f3; border-radius: 8px; padding: 12px; }
     .card span { display: block; font-size: 12px; color: #50615e; }
@@ -685,6 +799,10 @@ def home() -> str:
       <button id="analyzeBtn" onclick="run(this)">Analyze Shaft</button>
       <button id="exportJsonBtn" class="secondary" onclick="downloadJson(this)">Export JSON</button>
       <button id="exportGcodeBtn" class="secondary" onclick="downloadGcode(this)">Export G-Code</button>
+      <div class="debug-panel">
+        <h3>Debug / Health</h3>
+        <table><tbody id="debugHealth"></tbody></table>
+      </div>
       <p><a href="/docs">Developer API tester</a></p>
     </section>
     <section class="workspace">
@@ -732,7 +850,7 @@ def home() -> str:
           <div class="cad-chip">Workflow<strong>Swing to Shaft</strong></div>
           <div class="cad-chip">Output<strong>Target Profile</strong></div>
           <div class="cad-chip">CAD Link<strong>Apply Build</strong></div>
-          <div class="cad-chip">Mode<strong>Prototype</strong></div>
+          <div class="cad-chip">Sync State<strong id="fitSyncState">Not synced</strong></div>
         </div>
         <h3>Fit-to-Build Swing Inputs</h3>
         <div class="fit-grid">
@@ -751,6 +869,18 @@ def home() -> str:
           <button id="fitApplyBtn" class="secondary" onclick="applyFitToCad(this)">Apply to CAD</button>
           <button id="fitExportBtn" class="secondary" onclick="downloadFitProfile(this)">Export Fit Profile</button>
         </div>
+        <div class="fit-actions">
+          <button id="fitSyncPacketBtn" class="secondary" onclick="downloadFitCadPacket(this)">Export Fit-CAD Packet</button>
+          <button id="fitPullCadBtn" class="secondary" onclick="pullCadIntoFit(this)">Pull CAD -> Fit Inputs</button>
+        </div>
+        <h3>CPM Calibration (Clamp / Weight Rig)</h3>
+        <div class="fit-grid">
+          <div><label>Clamp Length (in)</label><input id="cpmClampIn" type="number" value="5.0" step="0.1"></div>
+          <div><label>Overall Weight (g)</label><input id="cpmOverallWeight" type="number" value="205" step="1"></div>
+          <div><label>Profile Weight (g)</label><input id="cpmProfileWeight" type="number" value="255" step="1"></div>
+          <div><label>Overall K</label><input id="cpmOverallK" type="number" value="14.7" step="0.1"></div>
+          <div><label>Zone K</label><input id="cpmZoneK" type="number" value="8.5" step="0.1"></div>
+        </div>
         <div class="grid2">
           <div>
             <h3>Target Shaft Profile</h3>
@@ -759,6 +889,16 @@ def home() -> str:
           <div>
             <h3>Build Recommendation</h3>
             <pre id="fitBuild"></pre>
+          </div>
+        </div>
+        <div class="grid2">
+          <div>
+            <h3>Fit/CAD Bridge</h3>
+            <table><tbody id="fitBridge"></tbody></table>
+          </div>
+          <div>
+            <h3>Fit Scoring</h3>
+            <table><tbody id="fitScore"></tbody></table>
           </div>
         </div>
       </div>
@@ -841,6 +981,36 @@ def home() -> str:
         <div class="tool-row">
           <button id="constraintApplyBtn" class="secondary" onclick="applyFlagConstraints(this)">Apply Constraints</button>
           <button id="constraintResetBtn" class="secondary" onclick="resetFlagConstraints(this)">Reset Constraints</button>
+        </div>
+        <h3>Dimension Presets</h3>
+        <div class="mini-grid">
+          <div>
+            <label>Length mm</label>
+            <input id="dimLengthInput" type="number" value="360" step="1" min="1">
+          </div>
+          <div>
+            <label>Root mm</label>
+            <input id="dimRootInput" type="number" value="76" step="1" min="1">
+          </div>
+        </div>
+        <div class="mini-grid">
+          <div>
+            <label>Tip mm</label>
+            <input id="dimTipInput" type="number" value="58" step="1" min="1">
+          </div>
+          <div>
+            <label>Angle rule</label>
+            <select id="dimAngleRule">
+              <option value="keep">Keep current angle</option>
+              <option value="zero">Set angle to 0</option>
+              <option value="bias_pair">Set to +/-45 bias pair</option>
+            </select>
+          </div>
+        </div>
+        <div class="tool-row">
+          <button id="dimApplySelectedBtn" class="secondary" onclick="applyDimensionPreset('selected', this)">Apply to Selected</button>
+          <button id="dimApplyAllBtn" class="secondary" onclick="applyDimensionPreset('all', this)">Apply to All Flags</button>
+          <button id="dimProgressiveBtn" class="secondary" onclick="applyDimensionPreset('progressive', this)">Progressive Taper Set</button>
         </div>
         <h3>Constraint Set</h3>
         <table class="editable-table">
@@ -987,6 +1157,13 @@ def home() -> str:
             <label>Show Grid <input id="cadShowGrid" type="checkbox" checked onchange="drawCad3d()"></label>
             <label>Smooth Render <input id="cadSmooth" type="checkbox" onchange="drawCad3d()"></label>
             <label>Zoom To Fit <input id="cadZoomFit" type="checkbox" onchange="drawCad3d()"></label>
+            <div class="tool-row">
+              <button id="cadRefreshBtn" class="secondary" onclick="drawCad3d()">Refresh View</button>
+              <button id="cadPresetDarkBtn" class="secondary" onclick="setCadPreset('dark', this)">Dark Preset</button>
+              <button id="cadPresetLightBtn" class="secondary" onclick="setCadPreset('light', this)">Light Preset</button>
+              <button id="cadPresetInspectBtn" class="secondary" onclick="setCadPreset('inspect', this)">Inspect Preset</button>
+              <button id="cadSyncScriptBtn" class="secondary" onclick="syncCadScript(this)">Sync Script</button>
+            </div>
             <h3>Documentation</h3>
             <div class="link-list">
               <button onclick="loadCadExample('shaft')">Shaft Envelope</button>
@@ -1014,11 +1191,22 @@ def home() -> str:
     let tapes = defaultTapes();
     let stackLayers = [];
     let flagGeometry = [];
+    let dimensionHandles = [];
     let activeDrag = null;
     let selectedFlagIndex = null;
     let sketchTool = 'select';
     let latestFitProfile = null;
+    let fitCadBridge = null;
     let flagConstraints = defaultFlagConstraints(defaultFlags().length);
+    const debugState = {
+      bootTime: new Date().toISOString(),
+      mode: 'edit',
+      lastStatus: 'Booting',
+      statusKind: 'ok',
+      lastAction: '-',
+      lastError: '-',
+      errors: 0
+    };
     const APP_MODE = new URLSearchParams(window.location.search).get('mode') === 'viewer' ? 'viewer' : 'edit';
     const VIEWER_ALLOWED_BUTTON_IDS = new Set(['simTab', 'fitTab', 'drawTab', 'flagTab', 'tapeTab', 'stackTab', 'cad3dTab']);
     const ARCHITECTURES = {
@@ -1065,6 +1253,13 @@ def home() -> str:
       if (!status) return;
       status.textContent = message;
       status.classList.toggle('bad', Boolean(isBad));
+      debugState.lastStatus = message;
+      debugState.statusKind = isBad ? 'bad' : 'ok';
+      if (isBad) {
+        debugState.lastError = message;
+        debugState.errors += 1;
+      }
+      renderDebugHealth();
     }
 
     function isViewerMode() {
@@ -1073,6 +1268,7 @@ def home() -> str:
 
     function applyViewerMode() {
       if (!isViewerMode()) return;
+      debugState.mode = 'viewer';
       document.body.classList.add('viewer-mode');
       const badge = document.querySelector('.build-badge');
       if (badge) badge.innerHTML += '<span class="viewer-note">Viewer Mode</span>';
@@ -1091,6 +1287,23 @@ def home() -> str:
       const projectFile = document.getElementById('projectFile');
       if (projectFile) projectFile.disabled = true;
       setAppStatus('Viewer mode active: edits and exports are locked.');
+    }
+
+    function renderDebugHealth() {
+      const body = document.getElementById('debugHealth');
+      if (!body) return;
+      const rows = [
+        ['Mode', debugState.mode],
+        ['Boot Time', debugState.bootTime],
+        ['Last Action', debugState.lastAction],
+        ['Last Status', debugState.lastStatus],
+        ['Status', debugState.statusKind.toUpperCase()],
+        ['Error Count', String(debugState.errors)],
+        ['Last Error', debugState.lastError]
+      ];
+      body.innerHTML = rows
+        .map(([label, value]) => `<tr><th>${label}</th><td>${value || '-'}</td></tr>`)
+        .join('');
     }
 
     window.onerror = function(message, source, line, column) {
@@ -1375,6 +1588,7 @@ def home() -> str:
       stackTab.classList.toggle('active', viewName === 'stack');
       cad3dTab.classList.toggle('active', viewName === 'cad3d');
       if (viewName === 'drawing' && latest) drawDesign(latest);
+      if (viewName === 'fit') renderFitBridge();
       if (viewName === 'flags') renderFlagEditor();
       if (viewName === 'tape') renderTapeCad();
       if (viewName === 'stack') renderStackCad();
@@ -1420,7 +1634,12 @@ def home() -> str:
           gcode_spin_feed: document.getElementById('spinFeed').value,
           gcode_spindle_rpm: document.getElementById('spindleRpm').value,
           gcode_tool_number: document.getElementById('toolNumber').value,
-          gcode_pass_count: document.getElementById('passCount').value
+          gcode_pass_count: document.getElementById('passCount').value,
+          cpm_clamp_length_in: document.getElementById('cpmClampIn')?.value || '5.0',
+          cpm_overall_weight_g: document.getElementById('cpmOverallWeight')?.value || '205',
+          cpm_profile_weight_g: document.getElementById('cpmProfileWeight')?.value || '255',
+          cpm_overall_k: document.getElementById('cpmOverallK')?.value || '14.7',
+          cpm_zone_k: document.getElementById('cpmZoneK')?.value || '8.5'
         });
         const res = await fetch('/api/analyze?' + params.toString());
         if (!res.ok) throw new Error(`Analyze API failed: ${res.status}`);
@@ -1453,6 +1672,8 @@ def home() -> str:
         ['Natural Frequency', latest.natural_frequency_hz.toFixed(2) + ' Hz'],
         ['Fatigue Cycles', latest.fatigue_cycles_estimate.toExponential(2)],
         ['Material Cost', '$' + latest.material_cost_usd.toFixed(2)],
+        ['Clamp Length', (latest.cpm_calibration?.clamp_length_in ?? 5).toFixed(2) + ' in'],
+        ['CPM Weights', `${(latest.cpm_calibration?.overall_weight_g ?? 205).toFixed(0)}g / ${(latest.cpm_calibration?.profile_weight_g ?? 255).toFixed(0)}g`],
         ['Best Wrap Angle', latest.wrapping_angle_optimization.best.angle_deg + ' deg'],
         ['TapeCAD Mass Added', latest.tape_engineering.estimated_mass_g.toFixed(2) + ' g'],
         ['TapeCAD CPM Boost', '+' + latest.tape_engineering.estimated_cpm_boost.toFixed(1)],
@@ -1512,6 +1733,74 @@ def home() -> str:
 
     function fitMultiplier(value, mapping) {
       return mapping[value] || 0;
+    }
+
+    function buildFitCadPacket() {
+      if (!latestFitProfile) return null;
+      const targetCpm = numberOr(document.getElementById('target')?.value, latestFitProfile.target_cpm);
+      const wrapAngle = numberOr(document.getElementById('angle')?.value, latestFitProfile.wrap_angle_deg);
+      const cadFlagCount = flags.length;
+      return {
+        version: 'ae-fitcad-1',
+        generated_at: new Date().toISOString(),
+        fitting_target: latestFitProfile,
+        cad_state: {
+          target_cpm_input: targetCpm,
+          wrap_angle_input: wrapAngle,
+          flag_count: cadFlagCount,
+          architecture_mode: document.getElementById('architectureMode')?.value || 'flag_wrap'
+        },
+        transfer: {
+          set_target_cpm: latestFitProfile.target_cpm,
+          set_wrap_angle_deg: latestFitProfile.wrap_angle_deg,
+          bias_pair_deg: [latestFitProfile.wrap_angle_deg, -latestFitProfile.wrap_angle_deg],
+          tip_strategy: latestFitProfile.tip_strategy
+        }
+      };
+    }
+
+    function renderFitBridge(direction) {
+      const chip = document.getElementById('fitSyncState');
+      const table = document.getElementById('fitBridge');
+      const score = document.getElementById('fitScore');
+      if (!table || !score) return;
+
+      if (!latestFitProfile) {
+        if (chip) chip.textContent = 'Waiting on fit target';
+        table.innerHTML = '<tr><td colspan="2">Generate a fit target to initialize bridge packet.</td></tr>';
+        score.innerHTML = '<tr><td colspan="2">No score yet.</td></tr>';
+        return;
+      }
+
+      fitCadBridge = {
+        direction: direction || (fitCadBridge?.direction || 'fit-generated'),
+        synced_at: new Date().toLocaleTimeString(),
+        packet: buildFitCadPacket()
+      };
+
+      const packet = fitCadBridge.packet;
+      if (chip) chip.textContent = `${fitCadBridge.direction} @ ${fitCadBridge.synced_at}`;
+      table.innerHTML = [
+        ['Direction', fitCadBridge.direction],
+        ['Synced At', fitCadBridge.synced_at],
+        ['Packet Version', packet.version],
+        ['CAD Mode', packet.cad_state.architecture_mode],
+        ['CAD Flag Count', String(packet.cad_state.flag_count)],
+        ['Transfer CPM', packet.transfer.set_target_cpm.toFixed(1)],
+        ['Transfer Wrap Angle', packet.transfer.set_wrap_angle_deg.toFixed(0) + ' deg']
+      ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
+
+      const cpmDelta = Math.abs(packet.transfer.set_target_cpm - packet.cad_state.target_cpm_input);
+      const wrapDelta = Math.abs(packet.transfer.set_wrap_angle_deg - packet.cad_state.wrap_angle_input);
+      const fitQuality = Math.max(0, 100 - cpmDelta * 6 - wrapDelta * 1.6);
+      const torqueWindow = latestFitProfile.torque_target_deg <= 3.4 ? 'Stout' : latestFitProfile.torque_target_deg <= 3.9 ? 'Balanced' : 'Active';
+      score.innerHTML = [
+        ['Fit Quality Index', fitQuality.toFixed(1) + ' / 100'],
+        ['CPM Alignment Error', cpmDelta.toFixed(2)],
+        ['Angle Alignment Error', wrapDelta.toFixed(2) + ' deg'],
+        ['Torque Window', torqueWindow],
+        ['Launch Intent', latestFitProfile.launch_bias]
+      ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
     }
 
     function runFitToBuild(button) {
@@ -1583,6 +1872,7 @@ def home() -> str:
           ]
         }
       }, null, 2);
+      renderFitBridge('fit-generated');
     }
 
     function applyFitToCad(button) {
@@ -1599,6 +1889,7 @@ def home() -> str:
       ];
       renderFlagEditor();
       run();
+      renderFitBridge('fit->cad apply');
       writeCadConsole('Applied Fit-to-Build target to CAD model.');
     }
 
@@ -1612,6 +1903,45 @@ def home() -> str:
       a.download = 'shaft-fit-to-build-profile.json';
       a.click();
       URL.revokeObjectURL(url);
+    }
+
+    function downloadFitCadPacket(button) {
+      if (!latestFitProfile) runFitToBuild(button);
+      const packet = buildFitCadPacket();
+      if (!packet) return;
+      flashButton(button, 'Exported');
+      const blob = new Blob([JSON.stringify(packet, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaft-fit-cad-bridge-packet.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      renderFitBridge('fit->cad packet');
+      writeCadConsole('Exported Fit/CAD bridge packet.');
+    }
+
+    function pullCadIntoFit(button) {
+      const speed = numberOr(document.getElementById('speed')?.value, 105);
+      const target = numberOr(document.getElementById('target')?.value, 255);
+      const angle = numberOr(document.getElementById('angle')?.value, 45);
+      const launch = latest?.launch_simulation?.launch_angle_deg ?? 13.5;
+      const spin = latest?.launch_simulation?.spin_rpm ?? 2650;
+      document.getElementById('fitSpeed').value = speed.toFixed(0);
+      document.getElementById('fitLaunch').value = Number(launch).toFixed(1);
+      document.getElementById('fitSpin').value = Number(spin).toFixed(0);
+      if (angle >= 50) {
+        document.getElementById('fitTransition').value = 'Hard';
+      } else if (angle <= 38) {
+        document.getElementById('fitTransition').value = 'Smooth';
+      } else {
+        document.getElementById('fitTransition').value = 'Medium';
+      }
+      flashButton(button, 'Pulled');
+      runFitToBuild();
+      if (latestFitProfile) latestFitProfile.target_cpm = target;
+      renderFitBridge('cad->fit pull');
+      writeCadConsole('Pulled CAD state into fitting inputs and regenerated fit target.');
     }
 
     function drawDesign(data) {
@@ -1779,6 +2109,62 @@ def home() -> str:
       writeCadConsole(`Mirrored angle for ${flag.name} to ${flag.angle} deg.`);
     }
 
+    function applyDimensionPreset(scope, button) {
+      const lengthInput = document.getElementById('dimLengthInput');
+      const rootInput = document.getElementById('dimRootInput');
+      const tipInput = document.getElementById('dimTipInput');
+      const angleRule = document.getElementById('dimAngleRule')?.value || 'keep';
+      if (!lengthInput || !rootInput || !tipInput) return;
+
+      const targetLength = Math.max(1, numberOr(lengthInput.value, 360));
+      const targetRoot = Math.max(1, numberOr(rootInput.value, 76));
+      const targetTip = Math.max(1, numberOr(tipInput.value, 58));
+
+      const applyAngle = (flag, index) => {
+        if (angleRule === 'zero') {
+          flag.angle = 0;
+        } else if (angleRule === 'bias_pair') {
+          if ((flag.layer || '').toLowerCase().includes('bias') || /bias/i.test(flag.name || '')) {
+            flag.angle = index % 2 === 0 ? 45 : -45;
+          }
+        }
+      };
+
+      if (scope === 'selected') {
+        if (!requireSelectedFlag('Apply dimension preset')) return;
+        const selected = flags[selectedFlagIndex];
+        selected.length = targetLength;
+        selected.root = targetRoot;
+        selected.tip = targetTip;
+        applyAngle(selected, selectedFlagIndex);
+        flags[selectedFlagIndex] = normalizeFlag(selected);
+      } else if (scope === 'all') {
+        flags = flags.map((flag, index) => {
+          const next = { ...flag, length: targetLength, root: targetRoot, tip: targetTip };
+          applyAngle(next, index);
+          return normalizeFlag(next);
+        });
+      } else if (scope === 'progressive') {
+        const count = Math.max(flags.length - 1, 1);
+        flags = flags.map((flag, index) => {
+          const t = index / count;
+          const length = targetLength - t * Math.max(0, targetLength * 0.28);
+          const root = targetRoot - t * Math.max(0, targetRoot * 0.35);
+          const tip = targetTip - t * Math.max(0, targetTip * 0.35);
+          const next = { ...flag, length, root, tip };
+          applyAngle(next, index);
+          return normalizeFlag(next);
+        });
+      }
+
+      if (button) flashButton(button, 'Applied');
+      updateFlagTableValues();
+      drawFlags();
+      renderConstraintTable();
+      updateValidationReadout();
+      writeCadConsole(`Dimension preset applied (${scope}).`);
+    }
+
     function updateFlagTableValues() {
       flags.forEach((flag, index) => {
         const length = document.getElementById(`flagLength${index}`);
@@ -1863,6 +2249,19 @@ def home() -> str:
     function flagMouseDown(event) {
       if (isViewerMode()) return;
       const point = canvasPoint(event);
+      let dimBest = null;
+      dimensionHandles.forEach(handle => {
+        const d = Math.hypot(point.x - handle.x, point.y - handle.y);
+        if (d < 13 && (!dimBest || d < dimBest.distance)) {
+          dimBest = { ...handle, distance: d };
+        }
+      });
+      if (dimBest) {
+        selectedFlagIndex = dimBest.flagIndex;
+        activeDrag = { kind: 'dimension', flagIndex: dimBest.flagIndex, dimension: dimBest.dimension };
+        drawFlags();
+        return;
+      }
       let best = null;
       flagGeometry.forEach((geometry, flagIndex) => {
         geometry.points.forEach((cornerPoint, cornerIndex) => {
@@ -1874,7 +2273,7 @@ def home() -> str:
       });
       if (best) {
         selectedFlagIndex = best.flagIndex;
-        activeDrag = best;
+        activeDrag = { kind: 'corner', ...best };
         drawFlags();
         return;
       }
@@ -1891,6 +2290,19 @@ def home() -> str:
       if (!geometry) return;
       const flag = flags[activeDrag.flagIndex];
       if (document.getElementById('lockDimensions').checked || flag.locked) return;
+      if (activeDrag.kind === 'dimension') {
+        if (activeDrag.dimension === 'length') {
+          flag.length = Math.max(60, snapValue((point.x - geometry.x) / geometry.scale));
+        } else if (activeDrag.dimension === 'root') {
+          flag.root = Math.max(8, snapValue((Math.abs(point.y - geometry.y) * 2) / geometry.scale));
+        } else if (activeDrag.dimension === 'tip') {
+          flag.tip = Math.max(8, snapValue((Math.abs(point.y - geometry.y) * 2) / geometry.scale));
+        }
+        flags[activeDrag.flagIndex] = normalizeFlag(flag);
+        updateFlagTableValues();
+        drawFlags();
+        return;
+      }
       const localX = Math.max(40, point.x - geometry.x);
       const localY = Math.abs(point.y - geometry.y);
       if (activeDrag.cornerIndex === 1 || activeDrag.cornerIndex === 2) {
@@ -1948,6 +2360,19 @@ def home() -> str:
       ctx.strokeRect(x - 5, y - 5, 10, 10);
     }
 
+    function drawDimHandle(ctx, x, y, label, active) {
+      ctx.beginPath();
+      ctx.fillStyle = active ? '#ff2d20' : '#b24ac7';
+      ctx.strokeStyle = '#f4d3ff';
+      ctx.lineWidth = 1.5;
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#f4d3ff';
+      ctx.font = '700 11px Arial';
+      ctx.fillText(label, x - 10, y - 12);
+    }
+
     function drawFlags() {
       const canvas = document.getElementById('flagCanvas');
       const ctx = canvas.getContext('2d');
@@ -1986,6 +2411,7 @@ def home() -> str:
       const scale = Math.min(1.8, (canvas.width - 180) / maxLength);
       const rowGap = Math.max(78, (canvas.height - 90) / Math.max(flags.length, 1));
       flagGeometry = [];
+      dimensionHandles = [];
       ctx.font = '13px Arial';
       flags.forEach((flag, index) => {
         const y = 72 + index * rowGap;
@@ -2045,6 +2471,34 @@ def home() -> str:
         ctx.fillStyle = '#b24ac7';
         ctx.fillText(`Root ${flag.root} mm`, x - 82, y);
         ctx.fillText(`Tip ${flag.tip} mm`, x + flag.length * scale + 14, y);
+
+        if (selectedFlagIndex === index) {
+          const lengthHandle = { x: x + flag.length * scale, y: y + flag.root * scale / 2 + 30, flagIndex: index, dimension: 'length' };
+          const rootHandle = { x: x - 18, y, flagIndex: index, dimension: 'root' };
+          const tipHandle = { x: x + flag.length * scale + 22, y, flagIndex: index, dimension: 'tip' };
+          dimensionHandles.push(lengthHandle, rootHandle, tipHandle);
+          drawDimHandle(
+            ctx,
+            lengthHandle.x,
+            lengthHandle.y,
+            'L',
+            activeDrag && activeDrag.kind === 'dimension' && activeDrag.flagIndex === index && activeDrag.dimension === 'length'
+          );
+          drawDimHandle(
+            ctx,
+            rootHandle.x,
+            rootHandle.y,
+            'R',
+            activeDrag && activeDrag.kind === 'dimension' && activeDrag.flagIndex === index && activeDrag.dimension === 'root'
+          );
+          drawDimHandle(
+            ctx,
+            tipHandle.x,
+            tipHandle.y,
+            'T',
+            activeDrag && activeDrag.kind === 'dimension' && activeDrag.flagIndex === index && activeDrag.dimension === 'tip'
+          );
+        }
       });
 
       const totalArea = flags.reduce((sum, f) => sum + ((f.root + f.tip) / 2) * f.length, 0);
@@ -2900,6 +3354,11 @@ method = "${document.getElementById('method').value}"`
       const stamp = new Date().toLocaleTimeString();
       consolePanel.textContent += `\n[${stamp}] ${message}`;
       consolePanel.scrollTop = consolePanel.scrollHeight;
+      if (/error|failed|exception/i.test(String(message))) {
+        debugState.lastError = String(message);
+        debugState.errors += 1;
+      }
+      renderDebugHealth();
     }
 
     function selectedArchitecture() {
@@ -3221,6 +3680,45 @@ method = "${document.getElementById('method').value}"`
       updateCadInspector();
     }
 
+    function setCadPreset(preset, button) {
+      const dark = document.getElementById('cadDarkMode');
+      const axis = document.getElementById('cadShowAxis');
+      const grid = document.getElementById('cadShowGrid');
+      const smooth = document.getElementById('cadSmooth');
+      const zoomFit = document.getElementById('cadZoomFit');
+      if (!dark || !axis || !grid || !smooth || !zoomFit) return;
+      if (preset === 'dark') {
+        dark.checked = true;
+        axis.checked = true;
+        grid.checked = true;
+        smooth.checked = true;
+        zoomFit.checked = false;
+      } else if (preset === 'light') {
+        dark.checked = false;
+        axis.checked = true;
+        grid.checked = true;
+        smooth.checked = false;
+        zoomFit.checked = false;
+      } else if (preset === 'inspect') {
+        dark.checked = false;
+        axis.checked = true;
+        grid.checked = true;
+        smooth.checked = true;
+        zoomFit.checked = true;
+      }
+      flashButton(button, 'Applied');
+      drawCad3d();
+      writeCadConsole(`View preset applied: ${preset}`);
+    }
+
+    function syncCadScript(button) {
+      const script = document.getElementById('cadScript');
+      if (!script) return;
+      script.value = shaftCadScript();
+      flashButton(button, 'Synced');
+      writeCadConsole('CAD script synchronized with current project state.');
+    }
+
     function downloadCadScript(button) {
       if (!ensureExportReady('CAD export', true)) return;
       flashButton(button, 'Exported');
@@ -3272,6 +3770,8 @@ method = "${document.getElementById('method').value}"`
     }
 
     function safeInvoke(name, callback) {
+      debugState.lastAction = name;
+      renderDebugHealth();
       if (isViewerMode() && !VIEWER_ALLOWED_BUTTON_IDS.has(name)) {
         setAppStatus('Viewer mode active: this action is locked.');
         return;
@@ -3315,6 +3815,8 @@ method = "${document.getElementById('method').value}"`
         fitGenerateBtn: button => runFitToBuild(button),
         fitApplyBtn: button => applyFitToCad(button),
         fitExportBtn: button => downloadFitProfile(button),
+        fitSyncPacketBtn: button => downloadFitCadPacket(button),
+        fitPullCadBtn: button => pullCadIntoFit(button),
         flagAddBtn: button => addFlag(button),
         flagTriangleBtn: button => addTriangleFlag(button),
         flagResetBtn: button => resetFlags(button),
@@ -3330,6 +3832,9 @@ method = "${document.getElementById('method').value}"`
         flagDuplicateBtn: button => duplicateSelectedFlag(button),
         flagDeleteSelectedBtn: button => deleteSelectedFlag(button),
         flagMirrorAngleBtn: button => mirrorSelectedFlagAngle(button),
+        dimApplySelectedBtn: button => applyDimensionPreset('selected', button),
+        dimApplyAllBtn: button => applyDimensionPreset('all', button),
+        dimProgressiveBtn: button => applyDimensionPreset('progressive', button),
         constraintApplyBtn: button => applyFlagConstraints(button),
         constraintResetBtn: button => resetFlagConstraints(button),
         projectSaveBtn: button => downloadProject(button),
@@ -3341,7 +3846,12 @@ method = "${document.getElementById('method').value}"`
         stackGenerateBtn: button => regenerateStack(button),
         stackJsonBtn: button => downloadStackJson(button),
         stackSheetBtn: button => downloadBuildSheet(button),
-        cadExportBtn: button => downloadCadScript(button)
+        cadExportBtn: button => downloadCadScript(button),
+        cadRefreshBtn: () => drawCad3d(),
+        cadPresetDarkBtn: button => setCadPreset('dark', button),
+        cadPresetLightBtn: button => setCadPreset('light', button),
+        cadPresetInspectBtn: button => setCadPreset('inspect', button),
+        cadSyncScriptBtn: button => syncCadScript(button)
       };
     }
 
@@ -3374,6 +3884,8 @@ method = "${document.getElementById('method').value}"`
     window.runFitToBuild = runFitToBuild;
     window.applyFitToCad = applyFitToCad;
     window.downloadFitProfile = downloadFitProfile;
+    window.downloadFitCadPacket = downloadFitCadPacket;
+    window.pullCadIntoFit = pullCadIntoFit;
     window.renderFlagEditor = renderFlagEditor;
     window.addFlag = addFlag;
     window.addTriangleFlag = addTriangleFlag;
@@ -3393,6 +3905,7 @@ method = "${document.getElementById('method').value}"`
     window.duplicateSelectedFlag = duplicateSelectedFlag;
     window.deleteSelectedFlag = deleteSelectedFlag;
     window.mirrorSelectedFlagAngle = mirrorSelectedFlagAngle;
+    window.applyDimensionPreset = applyDimensionPreset;
     window.applyFlagConstraints = applyFlagConstraints;
     window.resetFlagConstraints = resetFlagConstraints;
     window.downloadProject = downloadProject;
@@ -3412,6 +3925,8 @@ method = "${document.getElementById('method').value}"`
     window.loadCadExample = loadCadExample;
     window.updateArchitecturePanel = updateArchitecturePanel;
     window.drawCad3d = drawCad3d;
+    window.setCadPreset = setCadPreset;
+    window.syncCadScript = syncCadScript;
     window.downloadCadScript = downloadCadScript;
     window.downloadJson = downloadJson;
     window.downloadGcode = downloadGcode;
@@ -3419,6 +3934,7 @@ method = "${document.getElementById('method').value}"`
 
     function bootApp() {
       setAppStatus('AE boot starting: wiring controls and running first analysis...');
+      renderDebugHealth();
       applyViewerMode();
       bootstrapButtons();
       run().then(() => {
@@ -3447,6 +3963,11 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/favicon.ico")
+def favicon() -> Response:
+    return Response(status_code=204)
+
+
 @app.get("/api/analyze")
 def api_analyze(
     target_cpm: float = 255.0,
@@ -3463,6 +3984,11 @@ def api_analyze(
     gcode_spindle_rpm: int = 1200,
     gcode_tool_number: int = 1,
     gcode_pass_count: int = 1,
+    cpm_clamp_length_in: float = 5.0,
+    cpm_overall_weight_g: float = 205.0,
+    cpm_profile_weight_g: float = 255.0,
+    cpm_overall_k: float = 14.7,
+    cpm_zone_k: float = 8.5,
 ) -> dict[str, Any]:
     return analyze_shaft(
         target_cpm=target_cpm,
@@ -3479,6 +4005,11 @@ def api_analyze(
         gcode_spindle_rpm=gcode_spindle_rpm,
         gcode_tool_number=gcode_tool_number,
         gcode_pass_count=gcode_pass_count,
+        cpm_clamp_length_in=cpm_clamp_length_in,
+        cpm_overall_weight_g=cpm_overall_weight_g,
+        cpm_profile_weight_g=cpm_profile_weight_g,
+        cpm_overall_k=cpm_overall_k,
+        cpm_zone_k=cpm_zone_k,
     )
 
 
@@ -3530,3 +4061,63 @@ def api_methods() -> dict[str, Any]:
 @app.get("/api/architecture-modes")
 def api_architecture_modes() -> dict[str, Any]:
     return ARCHITECTURE_MODES
+
+
+@app.get("/api/fit/target")
+def api_fit_target(
+    speed_mph: float = 105.0,
+    launch_deg: float = 13.5,
+    spin_rpm: float = 2650.0,
+    weight_g: float = 65.0,
+    tempo: str = "Medium",
+    transition: str = "Medium",
+    release: str = "Mid",
+    miss: str = "Neutral",
+    feel: str = "Stable mid",
+) -> dict[str, Any]:
+    return fit_target_from_swing(
+        speed_mph=speed_mph,
+        launch_deg=launch_deg,
+        spin_rpm=spin_rpm,
+        weight_g=weight_g,
+        tempo=tempo,
+        transition=transition,
+        release=release,
+        miss=miss,
+        feel=feel,
+    )
+
+
+@app.get("/api/fit-cad/bridge")
+def api_fit_cad_bridge(
+    speed_mph: float = 105.0,
+    launch_deg: float = 13.5,
+    spin_rpm: float = 2650.0,
+    weight_g: float = 65.0,
+    tempo: str = "Medium",
+    transition: str = "Medium",
+    release: str = "Mid",
+    miss: str = "Neutral",
+    feel: str = "Stable mid",
+    architecture_mode: str = "flag_wrap",
+) -> dict[str, Any]:
+    fit_target = fit_target_from_swing(
+        speed_mph=speed_mph,
+        launch_deg=launch_deg,
+        spin_rpm=spin_rpm,
+        weight_g=weight_g,
+        tempo=tempo,
+        transition=transition,
+        release=release,
+        miss=miss,
+        feel=feel,
+    )
+    return {
+        "version": "ae-fitcad-1",
+        "fitting_target": fit_target,
+        "cad_transfer": {
+            "target_cpm": fit_target["target_cpm"],
+            "wrap_angle_deg": fit_target["wrap_angle_deg"],
+            "architecture_mode": architecture_mode,
+        },
+    }
