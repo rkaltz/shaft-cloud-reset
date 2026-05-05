@@ -3599,9 +3599,13 @@ def home() -> str:
       const hCount = flags.length;
       const vCount = flags.length * 2;
       const dimCount = flags.length * 3;
+      const intersectionCount =
+        (typeof computeSketchIntersections === 'function')
+          ? computeSketchIntersections().length
+          : 0;
       const constraintReadout = document.getElementById('constraintReadout');
       const sideSelection = document.getElementById('sideSelection');
-      if (constraintReadout) constraintReadout.textContent = `H: ${hCount} | V: ${vCount} | DIM: ${dimCount} | INT: ${sketchIntersections.length}`;
+      if (constraintReadout) constraintReadout.textContent = `H: ${hCount} | V: ${vCount} | DIM: ${dimCount} | INT: ${intersectionCount}`;
       if (sideSelection) {
         sideSelection.textContent = selectedFlagIndex === null
           ? `Tool: ${sketchTool}`
