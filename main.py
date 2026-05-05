@@ -632,6 +632,7 @@ def home() -> str:
     input, select, button { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 5px; border: 1px solid #b9c8c4; border-radius: 6px; font-size: 15px; }
     button { border: 0; background: #17695f; color: white; font-weight: 700; cursor: pointer; margin-top: 16px; }
     button.secondary { background: #4d5f5b; }
+    button.danger { background: #b3261e; color: #ffffff; }
     button.clicked { background: #d9911f; color: #17211f; }
     .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .panel-title { margin-top: 18px; padding-top: 14px; border-top: 1px solid #dbe4e1; font-size: 16px; }
@@ -674,8 +675,9 @@ def home() -> str:
     .cad-tool { background: #243532; color: #d7fff6; border: 1px solid #45615b; padding: 8px; margin: 0; }
     .cad-tool.active { background: #6d2d76; color: white; }
     .sketch-shell { display: grid; grid-template-columns: 72px 1fr 300px; gap: 0; border: 1px solid #344642; background: #050808; }
-    .sketch-menu { grid-column: 1 / 4; background: #202020; color: white; padding: 7px 10px; font-family: Georgia, serif; font-weight: 700; }
-    .sketch-menu span { margin-right: 18px; }
+    .sketch-menu { grid-column: 1 / 4; background: #202020; color: white; padding: 7px 10px; font-family: Georgia, serif; font-weight: 700; display: flex; gap: 8px; flex-wrap: wrap; }
+    .sketch-menu .menu-btn { width: auto; margin: 0; padding: 4px 8px; background: transparent; border: 1px solid transparent; color: #ffffff; border-radius: 4px; font-weight: 700; }
+    .sketch-menu .menu-btn:hover { border-color: #4a5d58; background: #293230; }
     .sketch-tools { background: #222; padding: 8px; display: grid; gap: 6px; align-content: start; }
     .sketch-icon { background: #151515; color: #15d61f; border: 1px solid #333; padding: 7px 4px; margin: 0; font-size: 15px; min-height: 32px; }
     .sketch-icon.purple { color: #ff34ff; }
@@ -802,6 +804,8 @@ def home() -> str:
       <div class="debug-panel">
         <h3>Debug / Health</h3>
         <table><tbody id="debugHealth"></tbody></table>
+        <label><input id="strictModeToggle" type="checkbox" onchange="setStrictMode(this.checked)"> Strict button mode</label>
+        <button id="debugAuditBtn" class="secondary" onclick="runButtonAudit(this)">Run Button Audit</button>
       </div>
       <p><a href="/docs">Developer API tester</a></p>
     </section>
@@ -910,11 +914,34 @@ def home() -> str:
           <div class="cad-chip">Selected Tool<strong id="drawTool">-</strong></div>
         </div>
         <h3>Composite Shaft Drawing</h3>
-        <canvas class="drawing-canvas" id="designCanvas" width="1100" height="420"></canvas>
+        <div class="cad-toolbar">
+          <button id="drawToolSelectBtn" class="cad-tool active">Select</button>
+          <button id="drawToolMoveBtn" class="cad-tool">Move</button>
+          <button id="drawToolAddBtn" class="cad-tool">Add Point</button>
+          <button id="drawToolDimBtn" class="cad-tool">Dimension</button>
+          <button id="drawToolDeleteBtn" class="cad-tool">Delete Point</button>
+        </div>
+        <div class="sketch-options">
+          <label><input id="drawSnapGrid" type="checkbox" checked> Snap to 5 mm</label>
+          <label><input id="drawOrthoLock" type="checkbox"> Ortho Lock (OD only)</label>
+          <span id="drawSelectionLabel">No station selected</span>
+        </div>
+        <div class="tool-row">
+          <button id="drawAddStationBtn">Add Station</button>
+          <button id="drawDeleteStationBtn" class="danger">Delete Selected Station</button>
+          <button id="drawResetProfileBtn" class="secondary">Reset Drawing Profile</button>
+        </div>
+        <canvas class="drawing-canvas" id="designCanvas" width="1100" height="420"
+          onmousedown="drawingMouseDown(event)" onmousemove="drawingMouseMove(event)" onmouseup="drawingMouseUp()" onmouseleave="drawingMouseUp()"></canvas>
         <div class="grid2">
           <div>
             <h3>Drawing Dimensions</h3>
             <table><thead><tr><th>Feature</th><th>Value</th></tr></thead><tbody id="drawingDims"></tbody></table>
+            <h3>Station Editor</h3>
+            <table class="editable-table">
+              <thead><tr><th>#</th><th>Station mm</th><th>OD mm</th></tr></thead>
+              <tbody id="drawingStationsRows"></tbody>
+            </table>
           </div>
           <div>
             <h3>Segment Schedule</h3>
@@ -932,7 +959,14 @@ def home() -> str:
         <h3>Prepreg Flag Constraint Sketcher</h3>
         <div class="sketch-shell">
           <div class="sketch-menu">
-            <span>File</span><span>Edit</span><span>View</span><span>New Group</span><span>Sketch</span><span>Constrain</span><span>Analyze</span><span>Help</span>
+            <button id="sketchMenuFileBtn" class="menu-btn" onclick="handleSketchMenu('file', this)">File</button>
+            <button id="sketchMenuEditBtn" class="menu-btn" onclick="handleSketchMenu('edit', this)">Edit</button>
+            <button id="sketchMenuViewBtn" class="menu-btn" onclick="handleSketchMenu('view', this)">View</button>
+            <button id="sketchMenuNewGroupBtn" class="menu-btn" onclick="handleSketchMenu('new-group', this)">New Group</button>
+            <button id="sketchMenuSketchBtn" class="menu-btn" onclick="handleSketchMenu('sketch', this)">Sketch</button>
+            <button id="sketchMenuConstrainBtn" class="menu-btn" onclick="handleSketchMenu('constrain', this)">Constrain</button>
+            <button id="sketchMenuAnalyzeBtn" class="menu-btn" onclick="handleSketchMenu('analyze', this)">Analyze</button>
+            <button id="sketchMenuHelpBtn" class="menu-btn" onclick="handleSketchMenu('help', this)">Help</button>
           </div>
           <div class="sketch-tools">
             <button class="sketch-icon active" onclick="setSketchTool('select', this)">SEL</button>
@@ -1139,7 +1173,9 @@ def home() -> str:
             <textarea id="cadScript" spellcheck="false"></textarea>
           </div>
           <div class="viewport-panel">
-            <canvas class="viewer-canvas" id="cad3dCanvas" width="900" height="520"></canvas>
+            <canvas class="viewer-canvas" id="cad3dCanvas" width="900" height="520"
+              onmousedown="cad3dMouseDown(event)" onmousemove="cad3dMouseMove(event)"
+              onmouseup="cad3dMouseUp()" onmouseleave="cad3dMouseUp()"></canvas>
             <div class="export-row">
               <select id="cadExportType">
                 <option>JSCAD script</option>
@@ -1157,6 +1193,19 @@ def home() -> str:
             <label>Show Grid <input id="cadShowGrid" type="checkbox" checked onchange="drawCad3d()"></label>
             <label>Smooth Render <input id="cadSmooth" type="checkbox" onchange="drawCad3d()"></label>
             <label>Zoom To Fit <input id="cadZoomFit" type="checkbox" onchange="drawCad3d()"></label>
+            <h3>Draft Sketch</h3>
+            <div class="cad-toolbar">
+              <button id="cadDraftSelectBtn" class="cad-tool active">Select</button>
+              <button id="cadDraftLineBtn" class="cad-tool">Line</button>
+              <button id="cadDraftRectBtn" class="cad-tool">Rect</button>
+              <button id="cadDraftCircleBtn" class="cad-tool">Circle</button>
+              <button id="cadDraftTriangleBtn" class="cad-tool">Triangle</button>
+            </div>
+            <div class="tool-row">
+              <button id="cadDraftDeleteBtn" class="secondary">Delete Selected</button>
+              <button id="cadDraftClearBtn" class="secondary">Clear Sketch</button>
+            </div>
+            <p id="cadDraftStatus">Tool: select</p>
             <div class="tool-row">
               <button id="cadRefreshBtn" class="secondary" onclick="drawCad3d()">Refresh View</button>
               <button id="cadPresetDarkBtn" class="secondary" onclick="setCadPreset('dark', this)">Dark Preset</button>
@@ -1192,6 +1241,16 @@ def home() -> str:
     let stackLayers = [];
     let flagGeometry = [];
     let dimensionHandles = [];
+    let drawingStations = [];
+    let selectedDrawingStationIndex = null;
+    let drawingDragActive = false;
+    let drawingTool = 'select';
+    let cadDraftEntities = [];
+    let cadDraftTool = 'select';
+    let cadDraftSelectedIndex = null;
+    let cadDraftDrag = null;
+    let cadDraftStart = null;
+    let cadDraftPreview = null;
     let activeDrag = null;
     let selectedFlagIndex = null;
     let sketchTool = 'select';
@@ -1205,7 +1264,9 @@ def home() -> str:
       statusKind: 'ok',
       lastAction: '-',
       lastError: '-',
-      errors: 0
+      errors: 0,
+      buttonAudit: 'Not run',
+      strictMode: true
     };
     const APP_MODE = new URLSearchParams(window.location.search).get('mode') === 'viewer' ? 'viewer' : 'edit';
     const VIEWER_ALLOWED_BUTTON_IDS = new Set(['simTab', 'fitTab', 'drawTab', 'flagTab', 'tapeTab', 'stackTab', 'cad3dTab']);
@@ -1298,8 +1359,10 @@ def home() -> str:
         ['Last Action', debugState.lastAction],
         ['Last Status', debugState.lastStatus],
         ['Status', debugState.statusKind.toUpperCase()],
+        ['Strict Mode', debugState.strictMode ? 'ON' : 'OFF'],
         ['Error Count', String(debugState.errors)],
-        ['Last Error', debugState.lastError]
+        ['Last Error', debugState.lastError],
+        ['Button Audit', debugState.buttonAudit]
       ];
       body.innerHTML = rows
         .map(([label, value]) => `<tr><th>${label}</th><td>${value || '-'}</td></tr>`)
@@ -1587,7 +1650,7 @@ def home() -> str:
       tapeTab.classList.toggle('active', viewName === 'tape');
       stackTab.classList.toggle('active', viewName === 'stack');
       cad3dTab.classList.toggle('active', viewName === 'cad3d');
-      if (viewName === 'drawing' && latest) drawDesign(latest);
+      if (viewName === 'drawing') drawDesign(latest);
       if (viewName === 'fit') renderFitBridge();
       if (viewName === 'flags') renderFlagEditor();
       if (viewName === 'tape') renderTapeCad();
@@ -1604,6 +1667,35 @@ def home() -> str:
       document.querySelectorAll('.cad-tool, .sketch-icon').forEach(item => item.classList.remove('active'));
       if (button) button.classList.add('active');
       drawFlags();
+    }
+
+    function handleSketchMenu(action, button) {
+      if (button) flashButton(button, 'OK');
+      if (action === 'file') {
+        writeCadConsole('Sketch menu: File -> use Save Project / Load Project below.');
+      } else if (action === 'edit') {
+        writeCadConsole('Sketch menu: Edit -> select a flag and use Duplicate/Delete/Mirror.');
+      } else if (action === 'view') {
+        const snap = document.getElementById('snapGrid');
+        if (snap) snap.checked = !snap.checked;
+        drawFlags();
+        writeCadConsole(`Sketch menu: View -> Snap grid ${snap && snap.checked ? 'ON' : 'OFF'}.`);
+      } else if (action === 'new-group') {
+        addFlag();
+        writeCadConsole('Sketch menu: New Group -> added new flag group.');
+      } else if (action === 'sketch') {
+        setSketchTool('line');
+        writeCadConsole('Sketch menu: Sketch -> line tool active.');
+      } else if (action === 'constrain') {
+        applyFlagConstraints();
+        writeCadConsole('Sketch menu: Constrain -> applied active constraints.');
+      } else if (action === 'analyze') {
+        run();
+        writeCadConsole('Sketch menu: Analyze -> shaft analysis started.');
+      } else if (action === 'help') {
+        setAppStatus('Sketch help: select flag, drag corner or L/R/T handles, then apply constraints.');
+        writeCadConsole('Sketch menu: Help -> interaction guide posted in status bar.');
+      }
     }
 
     function flashButton(button, label) {
@@ -1944,43 +2036,215 @@ def home() -> str:
       writeCadConsole('Pulled CAD state into fitting inputs and regenerated fit target.');
     }
 
+    function drawingSnap(value) {
+      const snap = document.getElementById('drawSnapGrid');
+      return snap && snap.checked ? Math.round(value / 5) * 5 : value;
+    }
+
+    function setDrawingTool(tool, button) {
+      if (isViewerMode()) return;
+      drawingTool = tool;
+      document.querySelectorAll('#drawingView .cad-tool').forEach(item => item.classList.remove('active'));
+      if (button) button.classList.add('active');
+      const selection = document.getElementById('drawSelectionLabel');
+      if (selection) {
+        selection.textContent = `Tool: ${tool} | ${selectedDrawingStationIndex === null ? 'No station selected' : `S${selectedDrawingStationIndex + 1} selected`}`;
+      }
+      drawDesign(latest);
+    }
+
+    function defaultDrawingStations() {
+      return [
+        { z: 0, od: 15.0 },
+        { z: 254, od: 13.0 },
+        { z: 508, od: 11.0 },
+        { z: 762, od: 9.0 },
+        { z: 1016, od: 7.0 }
+      ];
+    }
+
+    function ensureDrawingStations() {
+      if (!drawingStations.length) drawingStations = defaultDrawingStations();
+      drawingStations = drawingStations
+        .map(s => ({ z: Math.max(0, numberOr(s.z, 0)), od: Math.max(1, numberOr(s.od, 1)) }))
+        .sort((a, b) => a.z - b.z);
+      if (selectedDrawingStationIndex !== null) {
+        selectedDrawingStationIndex = Math.max(0, Math.min(selectedDrawingStationIndex, drawingStations.length - 1));
+      }
+    }
+
+    function renderDrawingStationRows() {
+      const tbody = document.getElementById('drawingStationsRows');
+      if (!tbody) return;
+      tbody.innerHTML = drawingStations.map((s, i) => `
+        <tr style="${selectedDrawingStationIndex === i ? 'background:#e5f5f1;' : ''}">
+          <td>${i + 1}</td>
+          <td><input type="number" value="${Math.round(s.z)}" step="1" onchange="updateDrawingStation(${i}, 'z', this.value)"></td>
+          <td><input type="number" value="${s.od.toFixed(2)}" step="0.1" onchange="updateDrawingStation(${i}, 'od', this.value)"></td>
+        </tr>
+      `).join('');
+    }
+
+    function updateDrawingStation(index, key, value) {
+      if (!drawingStations[index]) return;
+      drawingStations[index][key] = numberOr(value, drawingStations[index][key]);
+      ensureDrawingStations();
+      drawDesign(latest);
+    }
+
+    function addDrawingStation(button) {
+      ensureDrawingStations();
+      const last = drawingStations[drawingStations.length - 1];
+      const prev = drawingStations[drawingStations.length - 2] || { z: 0, od: 15 };
+      const newZ = Math.max(1, Math.round((prev.z + last.z) / 2));
+      const newOd = Math.max(1, (prev.od + last.od) / 2);
+      drawingStations.splice(drawingStations.length - 1, 0, { z: newZ, od: newOd });
+      selectedDrawingStationIndex = drawingStations.length - 2;
+      if (button) flashButton(button, 'Added');
+      drawDesign(latest);
+    }
+
+    function deleteSelectedDrawingStation(button) {
+      ensureDrawingStations();
+      if (selectedDrawingStationIndex === null || drawingStations.length <= 2) return;
+      if (selectedDrawingStationIndex === 0 || selectedDrawingStationIndex === drawingStations.length - 1) return;
+      drawingStations.splice(selectedDrawingStationIndex, 1);
+      selectedDrawingStationIndex = Math.min(selectedDrawingStationIndex, drawingStations.length - 1);
+      if (button) flashButton(button, 'Deleted');
+      drawDesign(latest);
+    }
+
+    function resetDrawingProfile(button) {
+      drawingStations = defaultDrawingStations();
+      selectedDrawingStationIndex = null;
+      if (button) flashButton(button, 'Reset');
+      drawDesign(latest);
+    }
+
+    function drawingCanvasPoint(event) {
+      const canvas = document.getElementById('designCanvas');
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * canvas.width / rect.width,
+        y: (event.clientY - rect.top) * canvas.height / rect.height
+      };
+    }
+
+    function drawingMouseDown(event) {
+      if (isViewerMode()) return;
+      ensureDrawingStations();
+      const canvas = document.getElementById('designCanvas');
+      const left = 76;
+      const right = canvas.width - 72;
+      const centerY = 205;
+      const bottomBand = 338;
+      const p = drawingCanvasPoint(event);
+      const totalLength = drawingStations[drawingStations.length - 1].z || 1016;
+      const maxOd = Math.max(...drawingStations.map(s => s.od), 1);
+      let best = null;
+      drawingStations.forEach((s, i) => {
+        const x = left + (s.z / totalLength) * (right - left);
+        const y = centerY - (s.od / maxOd) * (bottomBand - centerY) * 0.6;
+        const d = Math.hypot(p.x - x, p.y - y);
+        if (d < 12 && (!best || d < best.d)) best = { i, d };
+      });
+      if (best) {
+        selectedDrawingStationIndex = best.i;
+        drawingDragActive = drawingTool === 'move' || drawingTool === 'select';
+      } else {
+        if (drawingTool === 'add') {
+          const z = Math.max(1, Math.min(totalLength - 1, drawingSnap(((p.x - left) / (right - left)) * totalLength)));
+          let insertIndex = drawingStations.findIndex(s => s.z > z);
+          if (insertIndex < 0) insertIndex = drawingStations.length - 1;
+          if (insertIndex <= 0) insertIndex = 1;
+          const prev = drawingStations[insertIndex - 1];
+          const next = drawingStations[insertIndex];
+          const t = (z - prev.z) / Math.max(1, next.z - prev.z);
+          const interpOd = prev.od + (next.od - prev.od) * t;
+          drawingStations.splice(insertIndex, 0, { z, od: Math.max(1, drawingSnap(interpOd)) });
+          selectedDrawingStationIndex = insertIndex;
+          drawingDragActive = false;
+        } else {
+          selectedDrawingStationIndex = null;
+        }
+        drawingDragActive = false;
+      }
+      if (drawingTool === 'delete' && selectedDrawingStationIndex !== null) {
+        deleteSelectedDrawingStation();
+      }
+      drawDesign(latest);
+    }
+
+    function drawingMouseMove(event) {
+      if (isViewerMode()) return;
+      if (!drawingDragActive || selectedDrawingStationIndex === null) return;
+      if (drawingTool !== 'move' && drawingTool !== 'select') return;
+      const canvas = document.getElementById('designCanvas');
+      const left = 76;
+      const right = canvas.width - 72;
+      const centerY = 205;
+      const bottomBand = 338;
+      const p = drawingCanvasPoint(event);
+      ensureDrawingStations();
+      const totalLength = drawingStations[drawingStations.length - 1].z || 1016;
+      const maxOd = Math.max(...drawingStations.map(s => s.od), 1);
+
+      const station = drawingStations[selectedDrawingStationIndex];
+      if (selectedDrawingStationIndex !== 0 && selectedDrawingStationIndex !== drawingStations.length - 1) {
+        const zRaw = ((p.x - left) / (right - left)) * totalLength;
+        const prevZ = drawingStations[selectedDrawingStationIndex - 1].z + 5;
+        const nextZ = drawingStations[selectedDrawingStationIndex + 1].z - 5;
+        if (!(document.getElementById('drawOrthoLock')?.checked)) {
+          station.z = Math.max(prevZ, Math.min(nextZ, drawingSnap(zRaw)));
+        }
+      }
+      const yClamp = Math.max(80, Math.min(bottomBand - 10, p.y));
+      const odRaw = ((centerY - yClamp) / ((bottomBand - centerY) * 0.6)) * maxOd;
+      station.od = Math.max(1, drawingSnap(Math.abs(odRaw)));
+      drawDesign(latest);
+    }
+
+    function drawingMouseUp() {
+      drawingDragActive = false;
+    }
+
     function drawDesign(data) {
+      ensureDrawingStations();
       const canvas = document.getElementById('designCanvas');
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const ei = data.ei_profile;
-      const lengthMm = 1016;
       const left = 76;
       const right = canvas.width - 72;
       const centerY = 205;
-      const scaleX = (right - left) / lengthMm;
-      const maxOd = Math.max(...ei.map(s => s.outer_diameter_mm));
-      const radiusScale = 7.0;
+      const topBand = 72;
+      const bottomBand = 338;
+      const totalLength = drawingStations[drawingStations.length - 1].z || 1016;
+      const maxOd = Math.max(...drawingStations.map(s => s.od), 1);
+      const mapX = z => left + (z / totalLength) * (right - left);
+      const mapYTop = od => centerY - (od / maxOd) * (bottomBand - centerY) * 0.6;
+      const mapYBottom = od => centerY + (od / maxOd) * (bottomBand - centerY) * 0.6;
 
       ctx.fillStyle = '#101918';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.strokeStyle = '#243532';
       ctx.lineWidth = 1;
-      for (let x = left; x <= right; x += 63.5 * scaleX) {
-        ctx.beginPath(); ctx.moveTo(x, 42); ctx.lineTo(x, 350); ctx.stroke();
+      for (let x = left; x <= right; x += 50) {
+        ctx.beginPath(); ctx.moveTo(x, topBand); ctx.lineTo(x, bottomBand); ctx.stroke();
       }
-      for (let y = 65; y <= 345; y += 40) {
+      for (let y = topBand; y <= bottomBand; y += 34) {
         ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
       }
 
-      const stations = [0, 254, 508, 762, 1016];
-      const ods = [15, 13, 11, 9, 7];
       ctx.beginPath();
-      stations.forEach((z, i) => {
-        const x = left + z * scaleX;
-        const y = centerY - ods[i] * radiusScale;
+      drawingStations.forEach((s, i) => {
+        const x = mapX(s.z);
+        const y = mapYTop(s.od);
         if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       });
-      for (let i = stations.length - 1; i >= 0; i--) {
-        const x = left + stations[i] * scaleX;
-        const y = centerY + ods[i] * radiusScale;
-        ctx.lineTo(x, y);
+      for (let i = drawingStations.length - 1; i >= 0; i--) {
+        const s = drawingStations[i];
+        ctx.lineTo(mapX(s.z), mapYBottom(s.od));
       }
       ctx.closePath();
       ctx.fillStyle = '#d7fff6';
@@ -1991,42 +2255,57 @@ def home() -> str:
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      ctx.strokeStyle = '#f2b84b';
-      ctx.fillStyle = '#f2b84b';
-      ctx.lineWidth = 1.5;
-      const ZONES = [41, 36, 31, 26, 21, 16, 11];
-      ZONES.forEach(station => {
-        const x = left + (41 - station) * 25.4 * scaleX;
-        ctx.beginPath(); ctx.moveTo(x, 70); ctx.lineTo(x, 340); ctx.stroke();
-        ctx.fillText(station + '" CPM', x - 18, 58);
+      drawingStations.forEach((s, i) => {
+        const x = mapX(s.z);
+        const y = mapYTop(s.od);
+        ctx.fillStyle = selectedDrawingStationIndex === i ? '#f2b84b' : '#ffffff';
+        ctx.strokeStyle = '#0f3d38';
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#f2b84b';
+        ctx.font = '11px Arial';
+        ctx.fillText(`${Math.round(s.z)}mm / ${s.od.toFixed(1)}mm`, x - 30, y - 10);
       });
 
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '16px Arial';
-      ctx.fillText('Side Profile / Mandrel Envelope', left, 28);
-      ctx.font = '13px Arial';
-      ctx.fillText('Butt', left - 8, centerY + maxOd * radiusScale + 32);
-      ctx.fillText('Tip', right - 10, centerY + maxOd * radiusScale + 32);
-      ctx.fillText('Total Length: 1016 mm / 40 in', left, 382);
-      ctx.fillText('OD Taper: 15 mm butt to 7 mm tip', left + 260, 382);
-      ctx.fillText('CPM profiling stations shown in gold', left + 540, 382);
+      if (drawingTool === 'dimension' && selectedDrawingStationIndex !== null && drawingStations[selectedDrawingStationIndex + 1]) {
+        const a = drawingStations[selectedDrawingStationIndex];
+        const b = drawingStations[selectedDrawingStationIndex + 1];
+        const ax = mapX(a.z);
+        const bx = mapX(b.z);
+        const y = bottomBand + 20;
+        drawDimension(ctx, ax, y, bx, y, `${Math.round(b.z - a.z)} mm`);
+      }
 
-      document.getElementById('drawLength').textContent = '1016 mm';
-      document.getElementById('drawButt').textContent = '15.0 mm';
-      document.getElementById('drawTip').textContent = '7.0 mm';
-      document.getElementById('drawTool').textContent = 'T' + data.gcode_settings.tool_number;
+      const toolText = drawingDragActive ? 'Drag station' : selectedDrawingStationIndex === null ? 'Select station' : `Station #${selectedDrawingStationIndex + 1}`;
+      const drawLength = document.getElementById('drawLength');
+      if (drawLength) drawLength.textContent = `${Math.round(totalLength)} mm`;
+      const drawButt = document.getElementById('drawButt');
+      if (drawButt) drawButt.textContent = `${drawingStations[0].od.toFixed(1)} mm`;
+      const drawTip = document.getElementById('drawTip');
+      if (drawTip) drawTip.textContent = `${drawingStations[drawingStations.length - 1].od.toFixed(1)} mm`;
+      const drawTool = document.getElementById('drawTool');
+      if (drawTool) drawTool.textContent = `${drawingTool} | ${toolText}`;
+      const selection = document.getElementById('drawSelectionLabel');
+      if (selection) {
+        selection.textContent = selectedDrawingStationIndex === null
+          ? `Tool: ${drawingTool} | No station selected`
+          : `Tool: ${drawingTool} | S${selectedDrawingStationIndex + 1} @ ${Math.round(drawingStations[selectedDrawingStationIndex].z)} mm, OD ${drawingStations[selectedDrawingStationIndex].od.toFixed(1)} mm`;
+      }
       document.getElementById('drawingDims').innerHTML = [
-        ['Overall Length', '1016 mm / 40 in'],
-        ['Butt OD', '15.0 mm'],
-        ['Tip OD', '7.0 mm'],
-        ['Clamp Reference', '5 in'],
-        ['Profile Stations', '41, 36, 31, 26, 21, 16, 11 in'],
-        ['G-Code Units', data.gcode_settings.units],
-        ['Pass Count', data.gcode_settings.pass_count]
+        ['Overall Length', `${Math.round(totalLength)} mm / ${(totalLength / 25.4).toFixed(2)} in`],
+        ['Butt OD', `${drawingStations[0].od.toFixed(1)} mm`],
+        ['Tip OD', `${drawingStations[drawingStations.length - 1].od.toFixed(1)} mm`],
+        ['Station Count', String(drawingStations.length)],
+        ['Selected Station', selectedDrawingStationIndex === null ? 'none' : `#${selectedDrawingStationIndex + 1}`],
+        ['G-Code Units', data?.gcode_settings?.units || 'mm'],
+        ['Pass Count', String(data?.gcode_settings?.pass_count ?? '-')]
       ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
-      document.getElementById('segmentSchedule').innerHTML = data.ei_profile.map(
-        row => `<tr><td>${row.segment}</td><td>${row.outer_diameter_mm.toFixed(1)} mm</td><td>${row.ei_nm2.toExponential(2)}</td></tr>`
+      document.getElementById('segmentSchedule').innerHTML = drawingStations.map((s, i) =>
+        `<tr><td>S${i + 1}</td><td>${s.od.toFixed(1)} mm</td><td>${Math.round(s.z)} mm</td></tr>`
       ).join('');
+      renderDrawingStationRows();
     }
 
     function renderFlagEditor() {
@@ -3573,6 +3852,170 @@ method = "${document.getElementById('method').value}"`
       ctx.fillText(`${selectedArchitecture().name} design objects`, shaftX, shaftY + 88);
     }
 
+    function cadCanvasPoint(event) {
+      const canvas = document.getElementById('cad3dCanvas');
+      if (!canvas) return { x: 0, y: 0 };
+      const rect = canvas.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    }
+
+    function setCadDraftTool(tool, button) {
+      if (isViewerMode()) return;
+      cadDraftTool = tool;
+      document.querySelectorAll('#cad3dView #cadDraftSelectBtn, #cad3dView #cadDraftLineBtn, #cad3dView #cadDraftRectBtn, #cad3dView #cadDraftCircleBtn, #cad3dView #cadDraftTriangleBtn')
+        .forEach(item => item.classList.remove('active'));
+      if (button) button.classList.add('active');
+      const status = document.getElementById('cadDraftStatus');
+      if (status) status.textContent = `Tool: ${tool}`;
+      drawCad3d();
+    }
+
+    function cadEntityHit(entity, p) {
+      if (!entity) return false;
+      if (entity.type === 'circle') {
+        const dx = p.x - entity.x;
+        const dy = p.y - entity.y;
+        return Math.hypot(dx, dy) <= Math.max(8, entity.r + 6);
+      }
+      const x1 = Math.min(entity.x1, entity.x2);
+      const x2 = Math.max(entity.x1, entity.x2);
+      const y1 = Math.min(entity.y1, entity.y2);
+      const y2 = Math.max(entity.y1, entity.y2);
+      return p.x >= x1 - 8 && p.x <= x2 + 8 && p.y >= y1 - 8 && p.y <= y2 + 8;
+    }
+
+    function cad3dMouseDown(event) {
+      if (isViewerMode()) return;
+      const p = cadCanvasPoint(event);
+      if (cadDraftTool === 'select') {
+        cadDraftSelectedIndex = null;
+        for (let i = cadDraftEntities.length - 1; i >= 0; i--) {
+          if (cadEntityHit(cadDraftEntities[i], p)) {
+            cadDraftSelectedIndex = i;
+            cadDraftDrag = { startX: p.x, startY: p.y };
+            break;
+          }
+        }
+        drawCad3d();
+        return;
+      }
+      cadDraftStart = p;
+      cadDraftPreview = { type: cadDraftTool, x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+      drawCad3d();
+    }
+
+    function cad3dMouseMove(event) {
+      if (isViewerMode()) return;
+      const p = cadCanvasPoint(event);
+      if (cadDraftDrag && cadDraftSelectedIndex !== null && cadDraftEntities[cadDraftSelectedIndex]) {
+        const entity = cadDraftEntities[cadDraftSelectedIndex];
+        const dx = p.x - cadDraftDrag.startX;
+        const dy = p.y - cadDraftDrag.startY;
+        cadDraftDrag = { startX: p.x, startY: p.y };
+        if (entity.type === 'circle') {
+          entity.x += dx;
+          entity.y += dy;
+        } else {
+          entity.x1 += dx; entity.x2 += dx;
+          entity.y1 += dy; entity.y2 += dy;
+        }
+        drawCad3d();
+        return;
+      }
+      if (!cadDraftPreview) return;
+      cadDraftPreview.x2 = p.x;
+      cadDraftPreview.y2 = p.y;
+      drawCad3d();
+    }
+
+    function cad3dMouseUp() {
+      if (cadDraftDrag) {
+        cadDraftDrag = null;
+        return;
+      }
+      if (!cadDraftPreview || !cadDraftStart) return;
+      const e = cadDraftPreview;
+      if (e.type === 'circle') {
+        const r = Math.hypot(e.x2 - e.x1, e.y2 - e.y1);
+        if (r > 4) cadDraftEntities.push({ type: 'circle', x: e.x1, y: e.y1, r });
+      } else {
+        const minSize = Math.abs(e.x2 - e.x1) + Math.abs(e.y2 - e.y1);
+        if (minSize > 6) cadDraftEntities.push({ type: e.type, x1: e.x1, y1: e.y1, x2: e.x2, y2: e.y2 });
+      }
+      cadDraftSelectedIndex = cadDraftEntities.length - 1;
+      cadDraftPreview = null;
+      cadDraftStart = null;
+      drawCad3d();
+    }
+
+    function deleteCadDraftSelected(button) {
+      if (cadDraftSelectedIndex === null || !cadDraftEntities[cadDraftSelectedIndex]) return;
+      cadDraftEntities.splice(cadDraftSelectedIndex, 1);
+      cadDraftSelectedIndex = null;
+      if (button) flashButton(button, 'Deleted');
+      drawCad3d();
+    }
+
+    function clearCadDraft(button) {
+      cadDraftEntities = [];
+      cadDraftSelectedIndex = null;
+      cadDraftPreview = null;
+      cadDraftStart = null;
+      if (button) flashButton(button, 'Cleared');
+      drawCad3d();
+    }
+
+    function drawCadDraftEntity(ctx, entity, selected) {
+      ctx.save();
+      ctx.strokeStyle = selected ? '#ffbf3f' : '#f2b84b';
+      ctx.fillStyle = 'rgba(242,184,75,0.14)';
+      ctx.lineWidth = selected ? 2.6 : 1.8;
+      if (entity.type === 'line') {
+        ctx.beginPath(); ctx.moveTo(entity.x1, entity.y1); ctx.lineTo(entity.x2, entity.y2); ctx.stroke();
+      } else if (entity.type === 'rect') {
+        const x = Math.min(entity.x1, entity.x2);
+        const y = Math.min(entity.y1, entity.y2);
+        const w = Math.abs(entity.x2 - entity.x1);
+        const h = Math.abs(entity.y2 - entity.y1);
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeRect(x, y, w, h);
+      } else if (entity.type === 'triangle') {
+        const x = Math.min(entity.x1, entity.x2);
+        const y = Math.min(entity.y1, entity.y2);
+        const w = Math.abs(entity.x2 - entity.x1);
+        const h = Math.abs(entity.y2 - entity.y1);
+        ctx.beginPath();
+        ctx.moveTo(x + w / 2, y);
+        ctx.lineTo(x + w, y + h);
+        ctx.lineTo(x, y + h);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (entity.type === 'circle') {
+        ctx.beginPath();
+        ctx.arc(entity.x, entity.y, entity.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawCadDraftLayer(ctx) {
+      cadDraftEntities.forEach((entity, index) => drawCadDraftEntity(ctx, entity, index === cadDraftSelectedIndex));
+      if (cadDraftPreview) {
+        const preview = cadDraftPreview.type === 'circle'
+          ? { type: 'circle', x: cadDraftPreview.x1, y: cadDraftPreview.y1, r: Math.hypot(cadDraftPreview.x2 - cadDraftPreview.x1, cadDraftPreview.y2 - cadDraftPreview.y1) }
+          : cadDraftPreview;
+        drawCadDraftEntity(ctx, preview, false);
+      }
+      const status = document.getElementById('cadDraftStatus');
+      if (status) {
+        status.textContent = cadDraftSelectedIndex === null
+          ? `Tool: ${cadDraftTool} | Entities: ${cadDraftEntities.length}`
+          : `Tool: ${cadDraftTool} | Selected: #${cadDraftSelectedIndex + 1}`;
+      }
+    }
+
     function drawCad3d() {
       const canvas = document.getElementById('cad3dCanvas');
       if (!canvas) return;
@@ -3673,6 +4116,7 @@ method = "${document.getElementById('method').value}"`
       ctx.fillText('TOP', cubeX + 43, cubeY - 2);
       ctx.fillText('FRONT', cubeX + 8, cubeY + 48);
       ctx.fillText('RIGHT', cubeX + 62, cubeY + 48);
+      drawCadDraftLayer(ctx);
 
       const script = document.getElementById('cadScript');
       if (script) script.value = shaftCadScript();
@@ -3810,6 +4254,7 @@ method = "${document.getElementById('method').value}"`
         stackTab: () => showView('stack'),
         cad3dTab: () => showView('cad3d'),
         analyzeBtn: button => run(button),
+        debugAuditBtn: button => runButtonAudit(button),
         exportJsonBtn: button => downloadJson(button),
         exportGcodeBtn: button => downloadGcode(button),
         fitGenerateBtn: button => runFitToBuild(button),
@@ -3817,6 +4262,22 @@ method = "${document.getElementById('method').value}"`
         fitExportBtn: button => downloadFitProfile(button),
         fitSyncPacketBtn: button => downloadFitCadPacket(button),
         fitPullCadBtn: button => pullCadIntoFit(button),
+        drawAddStationBtn: button => addDrawingStation(button),
+        drawDeleteStationBtn: button => deleteSelectedDrawingStation(button),
+        drawResetProfileBtn: button => resetDrawingProfile(button),
+        drawToolSelectBtn: button => setDrawingTool('select', button),
+        drawToolMoveBtn: button => setDrawingTool('move', button),
+        drawToolAddBtn: button => setDrawingTool('add', button),
+        drawToolDimBtn: button => setDrawingTool('dimension', button),
+        drawToolDeleteBtn: button => setDrawingTool('delete', button),
+        sketchMenuFileBtn: button => handleSketchMenu('file', button),
+        sketchMenuEditBtn: button => handleSketchMenu('edit', button),
+        sketchMenuViewBtn: button => handleSketchMenu('view', button),
+        sketchMenuNewGroupBtn: button => handleSketchMenu('new-group', button),
+        sketchMenuSketchBtn: button => handleSketchMenu('sketch', button),
+        sketchMenuConstrainBtn: button => handleSketchMenu('constrain', button),
+        sketchMenuAnalyzeBtn: button => handleSketchMenu('analyze', button),
+        sketchMenuHelpBtn: button => handleSketchMenu('help', button),
         flagAddBtn: button => addFlag(button),
         flagTriangleBtn: button => addTriangleFlag(button),
         flagResetBtn: button => resetFlags(button),
@@ -3851,7 +4312,14 @@ method = "${document.getElementById('method').value}"`
         cadPresetDarkBtn: button => setCadPreset('dark', button),
         cadPresetLightBtn: button => setCadPreset('light', button),
         cadPresetInspectBtn: button => setCadPreset('inspect', button),
-        cadSyncScriptBtn: button => syncCadScript(button)
+        cadSyncScriptBtn: button => syncCadScript(button),
+        cadDraftSelectBtn: button => setCadDraftTool('select', button),
+        cadDraftLineBtn: button => setCadDraftTool('line', button),
+        cadDraftRectBtn: button => setCadDraftTool('rect', button),
+        cadDraftCircleBtn: button => setCadDraftTool('circle', button),
+        cadDraftTriangleBtn: button => setCadDraftTool('triangle', button),
+        cadDraftDeleteBtn: button => deleteCadDraftSelected(button),
+        cadDraftClearBtn: button => clearCadDraft(button)
       };
     }
 
@@ -3865,6 +4333,55 @@ method = "${document.getElementById('method').value}"`
       safeInvoke(button.id, () => route(button));
     }
 
+    function setStrictMode(enabled) {
+      debugState.strictMode = Boolean(enabled);
+      const toggle = document.getElementById('strictModeToggle');
+      if (toggle) toggle.checked = debugState.strictMode;
+      renderDebugHealth();
+      runButtonAudit();
+    }
+
+    function enforceStrictButtons(missingRoute) {
+      if (!debugState.strictMode) {
+        return;
+      }
+      missingRoute.forEach(button => {
+        button.disabled = true;
+        button.classList.add('viewer-locked');
+        button.title = 'Disabled by strict mode: no button route.';
+      });
+    }
+
+    function runButtonAudit(button) {
+      const routes = buttonRoutes();
+      const buttons = Array.from(document.querySelectorAll('button'));
+      const missingId = buttons.filter(item => !item.id);
+      const withId = buttons.filter(item => item.id);
+      const missingRoute = withId.filter(item => !routes[item.id]);
+      const deadRoute = Object.keys(routes).filter(id => !document.getElementById(id));
+      const inlineOnly = buttons.filter(item => item.getAttribute('onclick') && !item.id);
+      enforceStrictButtons(missingRoute);
+
+      debugState.buttonAudit = `ok:${withId.length - missingRoute.length}/${withId.length}, no-id:${missingId.length}, route-miss:${missingRoute.length}, dead-route:${deadRoute.length}`;
+      renderDebugHealth();
+
+      const problems = [];
+      if (missingId.length) problems.push(`Missing id: ${missingId.length}`);
+      if (missingRoute.length) problems.push(`No route for id: ${missingRoute.map(b => b.id).join(', ')}`);
+      if (deadRoute.length) problems.push(`Route target missing in DOM: ${deadRoute.join(', ')}`);
+      if (inlineOnly.length) problems.push(`Inline-only buttons (advisory): ${inlineOnly.length}`);
+
+      if (problems.length) {
+        setAppStatus(`Button audit found issues (${problems.length}).`, true);
+        writeCadConsole(`Button audit issues -> ${problems.join(' | ')}`);
+      } else {
+        setAppStatus('Button audit passed: all routed controls are wired.');
+        writeCadConsole('Button audit passed: no missing route targets.');
+      }
+
+      if (button) flashButton(button, 'Audited');
+    }
+
     function bootstrapButtons() {
       const routes = buttonRoutes();
       Object.keys(routes).forEach(id => bindClickById(id, button => routes[id](button)));
@@ -3876,16 +4393,28 @@ method = "${document.getElementById('method').value}"`
       }
       setAppStatus('AE boot OK: JavaScript loaded, buttons bound, emergency click router active.');
       writeCadConsole('Button safety bootstrap active: id bindings loaded. Emergency click router active.');
+      const strictToggle = document.getElementById('strictModeToggle');
+      if (strictToggle) strictToggle.checked = debugState.strictMode;
+      runButtonAudit();
     }
 
     window.showView = showView;
     window.setSketchTool = setSketchTool;
+    window.handleSketchMenu = handleSketchMenu;
     window.run = run;
     window.runFitToBuild = runFitToBuild;
     window.applyFitToCad = applyFitToCad;
     window.downloadFitProfile = downloadFitProfile;
     window.downloadFitCadPacket = downloadFitCadPacket;
     window.pullCadIntoFit = pullCadIntoFit;
+    window.updateDrawingStation = updateDrawingStation;
+    window.addDrawingStation = addDrawingStation;
+    window.deleteSelectedDrawingStation = deleteSelectedDrawingStation;
+    window.resetDrawingProfile = resetDrawingProfile;
+    window.setDrawingTool = setDrawingTool;
+    window.drawingMouseDown = drawingMouseDown;
+    window.drawingMouseMove = drawingMouseMove;
+    window.drawingMouseUp = drawingMouseUp;
     window.renderFlagEditor = renderFlagEditor;
     window.addFlag = addFlag;
     window.addTriangleFlag = addTriangleFlag;
@@ -3925,11 +4454,19 @@ method = "${document.getElementById('method').value}"`
     window.loadCadExample = loadCadExample;
     window.updateArchitecturePanel = updateArchitecturePanel;
     window.drawCad3d = drawCad3d;
+    window.setCadDraftTool = setCadDraftTool;
+    window.cad3dMouseDown = cad3dMouseDown;
+    window.cad3dMouseMove = cad3dMouseMove;
+    window.cad3dMouseUp = cad3dMouseUp;
+    window.deleteCadDraftSelected = deleteCadDraftSelected;
+    window.clearCadDraft = clearCadDraft;
     window.setCadPreset = setCadPreset;
     window.syncCadScript = syncCadScript;
     window.downloadCadScript = downloadCadScript;
     window.downloadJson = downloadJson;
     window.downloadGcode = downloadGcode;
+    window.setStrictMode = setStrictMode;
+    window.runButtonAudit = runButtonAudit;
     window.bootstrapButtons = bootstrapButtons;
 
     function bootApp() {
