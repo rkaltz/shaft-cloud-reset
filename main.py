@@ -1087,6 +1087,16 @@ def home() -> str:
           </thead>
           <tbody id="constraintRows"></tbody>
         </table>
+        <h3>Constraint Failure Diagnostics</h3>
+        <table class="editable-table">
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="constraintFailureRows"></tbody>
+        </table>
         <div class="tool-row">
           <button id="flagAddBtn" onclick="addFlag(this)">Add Flag</button>
           <button id="flagTriangleBtn" onclick="addTriangleFlag(this)">Add Triangle</button>
@@ -1648,6 +1658,83 @@ def home() -> str:
       `).join('');
       const tbody = document.getElementById('constraintRows');
       if (tbody) tbody.innerHTML = rows;
+      renderConstraintFailures();
+    }
+
+    function collectConstraintFailures() {
+      const errors = [];
+      const warnings = [];
+      const seenStationLayer = new Set();
+
+      const enabled = flagConstraints.filter(c => c && c.enabled);
+      enabled.forEach(constraint => {
+        if (constraint.type === 'length_step' && numberOr(constraint.value, 0) <= 0) {
+          errors.push('Length step must be greater than 0.');
+        }
+        if (constraint.type === 'min_tip_ratio') {
+          const ratio = numberOr(constraint.value, 0);
+          if (ratio <= 0 || ratio > 1) {
+            errors.push('Min tip ratio must be > 0 and <= 1.');
+          }
+        }
+        if (constraint.type === 'bias_pair_angle_abs') {
+          const angle = Math.abs(numberOr(constraint.value, 0));
+          if (angle <= 0 || angle >= 90) {
+            errors.push('Bias pair angle must be between 0 and 90 degrees.');
+          }
+        }
+      });
+
+      flags.forEach((flag, index) => {
+        const name = flag?.name || `Flag ${index + 1}`;
+        const root = numberOr(flag?.root, NaN);
+        const tip = numberOr(flag?.tip, NaN);
+        const station = String(flag?.station || 'Custom').trim().toLowerCase();
+        const layer = String(flag?.layer || 'custom').trim().toLowerCase();
+        const key = `${station}|${layer}`;
+        if (seenStationLayer.has(key)) {
+          warnings.push(`${name}: station conflict (${flag.station}/${flag.layer}) duplicated.`);
+        } else {
+          seenStationLayer.add(key);
+        }
+        if (Number.isFinite(root) && Number.isFinite(tip) && tip > root) {
+          warnings.push(`${name}: tip width is greater than root width; taper may be non-manufacturable.`);
+        }
+
+        const h = flagConstraints.find(c => c.id === `flag_${index}_horizontal` && c.enabled);
+        const v = flagConstraints.find(c => c.id === `flag_${index}_vertical` && c.enabled);
+        const a = flagConstraints.find(c => c.id === `flag_${index}_angle` && c.enabled);
+        const l = flagConstraints.find(c => c.id === `flag_${index}_length` && c.enabled);
+
+        if (h && v) errors.push(`${name}: over-constrained (horizontal + vertical both active).`);
+        if (h && a) errors.push(`${name}: over-constrained (horizontal conflicts with explicit angle).`);
+        if (l && numberOr(l.value, 0) <= 0) errors.push(`${name}: explicit length must be > 0.`);
+      });
+
+      flagConstraints.forEach(constraint => {
+        const m = /^flag_(\\d+)_/.exec(String(constraint.id || ''));
+        if (m) {
+          const idx = Number(m[1]);
+          if (!Number.isInteger(idx) || idx < 0 || idx >= flags.length) {
+            warnings.push(`Constraint ${constraint.id} points to a missing flag index.`);
+          }
+        }
+      });
+      return { errors, warnings };
+    }
+
+    function renderConstraintFailures() {
+      const tbody = document.getElementById('constraintFailureRows');
+      if (!tbody) return;
+      const state = collectConstraintFailures();
+      const rows = [];
+      if (state.errors.length === 0 && state.warnings.length === 0) {
+        rows.push(['OK', 'No constraint conflicts found.']);
+      } else {
+        state.errors.slice(0, 8).forEach(msg => rows.push(['Error', msg]));
+        state.warnings.slice(0, 8).forEach(msg => rows.push(['Warn', msg]));
+      }
+      tbody.innerHTML = rows.map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
     }
 
     function updateConstraint(index, key, value) {
@@ -1739,6 +1826,13 @@ def home() -> str:
       if (button) flashButton(button, 'Applied');
       normalizeFlags();
       ensureConstraintCoverage();
+      const failures = collectConstraintFailures();
+      if (failures.errors.length > 0) {
+        renderConstraintFailures();
+        setAppStatus(`Constraint solver failed: ${failures.errors[0]}`, true);
+        writeCadConsole(`Constraint solve failed with ${failures.errors.length} error(s).`);
+        return;
+      }
       let adjustments = 0;
       const byType = type => flagConstraints.find(c => c.type === type && c.enabled);
       const lengthStep = byType('length_step');
@@ -1793,6 +1887,7 @@ def home() -> str:
       });
       updateFlagTableValues();
       drawFlags();
+      renderConstraintFailures();
       writeCadConsole(`Constraint solver applied (${adjustments} adjustment${adjustments === 1 ? '' : 's'}).`);
       setAppStatus(`Constraint solver applied: ${adjustments} adjustment${adjustments === 1 ? '' : 's'}.`);
     }
@@ -3934,6 +4029,9 @@ method = "${document.getElementById('method').value}"`
       if (hasBiasConstraint && hasHorizontalBias) {
         warnings.push('Bias angle constraint and horizontal bias constraint are both active.');
       }
+      const constraintState = collectConstraintFailures();
+      constraintState.errors.forEach(msg => errors.push(`Constraint: ${msg}`));
+      constraintState.warnings.forEach(msg => warnings.push(`Constraint: ${msg}`));
       return { errors, warnings };
     }
 
