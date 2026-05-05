@@ -513,8 +513,24 @@ def analyze_shaft(
     cpm_profile_weight_g: float = 255.0,
     cpm_overall_k: float = 14.7,
     cpm_zone_k: float = 8.5,
+    material_e1_pa: float | None = None,
+    material_e2_pa: float | None = None,
+    material_g12_pa: float | None = None,
+    material_nu12: float | None = None,
+    material_density_kg_m3: float | None = None,
+    material_cost_per_kg: float | None = None,
 ) -> dict[str, Any]:
     material = MATERIALS.get(material_name, MATERIALS["Mitsubishi MR70"])
+    if all(v is not None for v in [material_e1_pa, material_e2_pa, material_g12_pa, material_nu12, material_density_kg_m3, material_cost_per_kg]):
+        material = Material(
+            name=material_name,
+            e1_pa=max(1.0, float(material_e1_pa)),
+            e2_pa=max(1.0, float(material_e2_pa)),
+            g12_pa=max(1.0, float(material_g12_pa)),
+            nu12=max(0.0, min(0.49, float(material_nu12))),
+            density_kg_m3=max(1.0, float(material_density_kg_m3)),
+            cost_per_kg=max(0.0, float(material_cost_per_kg)),
+        )
     method = MANUFACTURING_METHODS.get(method_key, MANUFACTURING_METHODS["roll_wrapped"])
     architecture = ARCHITECTURE_MODES.get(architecture_mode, ARCHITECTURE_MODES["flag_wrap"])
     segments = default_segments(base_angle=wrap_angle_deg)
@@ -771,6 +787,31 @@ def home() -> str:
         <option>Toray T1100G</option>
         <option>Hexcel IM7</option>
       </select>
+      <h3 class="panel-title">Material Library</h3>
+      <div class="tool-row">
+        <button id="materialAddBtn" class="secondary">Add Material</button>
+        <button id="materialDuplicateBtn" class="secondary">Duplicate Selected</button>
+        <button id="materialDeleteBtn" class="secondary">Delete Selected</button>
+      </div>
+      <div class="tool-row">
+        <button id="materialExportBtn" class="secondary">Export Materials</button>
+        <button id="materialImportBtn" class="secondary">Import Materials</button>
+        <input id="materialFile" type="file" accept="application/json,.json" style="display:none" onchange="loadMaterialsFile(event)">
+      </div>
+      <table class="editable-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>E1 (GPa)</th>
+            <th>E2 (GPa)</th>
+            <th>G12 (GPa)</th>
+            <th>nu12</th>
+            <th>Density</th>
+            <th>Cost/kg</th>
+          </tr>
+        </thead>
+        <tbody id="materialRows"></tbody>
+      </table>
       <label>Manufacturing Method</label>
       <select id="method">
         <option value="roll_wrapped">Roll-wrapped prepreg</option>
@@ -1299,6 +1340,7 @@ def home() -> str:
     let cadDraftMoveStartSnapshot = null;
     let designHistory = [];
     let designFuture = [];
+    let materialLibrary = {};
     let activeDrag = null;
     let selectedFlagIndex = null;
     let selectedFlagEdge = null;
@@ -1606,6 +1648,157 @@ def home() -> str:
     function numberOr(value, fallback) {
       const n = Number(value);
       return Number.isFinite(n) ? n : fallback;
+    }
+
+    function defaultMaterialLibrary() {
+      return {
+        'Mitsubishi MR70': { name: 'Mitsubishi MR70', e1_pa: 161e9, e2_pa: 8.7e9, g12_pa: 4.5e9, nu12: 0.32, density_kg_m3: 1600.0, cost_per_kg: 95.0 },
+        'Toray T1100G': { name: 'Toray T1100G', e1_pa: 215e9, e2_pa: 8.5e9, g12_pa: 4.2e9, nu12: 0.33, density_kg_m3: 1580.0, cost_per_kg: 125.0 },
+        'Hexcel IM7': { name: 'Hexcel IM7', e1_pa: 276e9, e2_pa: 14.0e9, g12_pa: 5.2e9, nu12: 0.31, density_kg_m3: 1620.0, cost_per_kg: 140.0 },
+      };
+    }
+
+    function normalizeMaterial(mat, fallbackName) {
+      const name = String(mat?.name || fallbackName || 'Custom Material');
+      return {
+        name,
+        e1_pa: Math.max(1, numberOr(mat?.e1_pa, 150e9)),
+        e2_pa: Math.max(1, numberOr(mat?.e2_pa, 8e9)),
+        g12_pa: Math.max(1, numberOr(mat?.g12_pa, 4e9)),
+        nu12: Math.max(0, Math.min(0.49, numberOr(mat?.nu12, 0.32))),
+        density_kg_m3: Math.max(1, numberOr(mat?.density_kg_m3, 1600)),
+        cost_per_kg: Math.max(0, numberOr(mat?.cost_per_kg, 100)),
+      };
+    }
+
+    function loadMaterialLibraryFromObject(obj) {
+      const next = {};
+      Object.entries(obj || {}).forEach(([key, value]) => {
+        const m = normalizeMaterial(value, key);
+        next[m.name] = m;
+      });
+      materialLibrary = Object.keys(next).length ? next : defaultMaterialLibrary();
+      renderMaterialLibrary();
+    }
+
+    function renderMaterialLibrary() {
+      const select = document.getElementById('material');
+      const prevSelected = select?.value || '';
+      const names = Object.keys(materialLibrary);
+      if (select) {
+        select.innerHTML = names.map(name => `<option value="${name}">${name}</option>`).join('');
+        select.value = names.includes(prevSelected) ? prevSelected : names[0];
+      }
+      const tbody = document.getElementById('materialRows');
+      if (!tbody) return;
+      tbody.innerHTML = names.map(name => {
+        const m = materialLibrary[name];
+        return `<tr>
+          <td><input type="text" value="${m.name}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'name', this.value)"></td>
+          <td><input type="number" step="0.1" value="${(m.e1_pa / 1e9).toFixed(2)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'e1_pa_gpa', this.value)"></td>
+          <td><input type="number" step="0.1" value="${(m.e2_pa / 1e9).toFixed(2)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'e2_pa_gpa', this.value)"></td>
+          <td><input type="number" step="0.1" value="${(m.g12_pa / 1e9).toFixed(2)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'g12_pa_gpa', this.value)"></td>
+          <td><input type="number" step="0.01" value="${m.nu12.toFixed(3)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'nu12', this.value)"></td>
+          <td><input type="number" step="1" value="${m.density_kg_m3.toFixed(0)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'density_kg_m3', this.value)"></td>
+          <td><input type="number" step="1" value="${m.cost_per_kg.toFixed(0)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'cost_per_kg', this.value)"></td>
+        </tr>`;
+      }).join('');
+    }
+
+    function selectedMaterialSpec() {
+      const name = document.getElementById('material')?.value;
+      return materialLibrary[name] || null;
+    }
+
+    function updateMaterialField(key, field, value) {
+      const current = materialLibrary[key];
+      if (!current) return;
+      const next = { ...current };
+      if (field === 'name') {
+        const newName = String(value || '').trim() || current.name;
+        delete materialLibrary[key];
+        materialLibrary[newName] = { ...next, name: newName };
+        renderMaterialLibrary();
+        designHistoryCommit(`material renamed: ${newName}`);
+        return;
+      }
+      if (field === 'e1_pa_gpa') next.e1_pa = Math.max(1, numberOr(value, next.e1_pa / 1e9) * 1e9);
+      else if (field === 'e2_pa_gpa') next.e2_pa = Math.max(1, numberOr(value, next.e2_pa / 1e9) * 1e9);
+      else if (field === 'g12_pa_gpa') next.g12_pa = Math.max(1, numberOr(value, next.g12_pa / 1e9) * 1e9);
+      else if (field === 'nu12') next.nu12 = Math.max(0, Math.min(0.49, numberOr(value, next.nu12)));
+      else if (field === 'density_kg_m3') next.density_kg_m3 = Math.max(1, numberOr(value, next.density_kg_m3));
+      else if (field === 'cost_per_kg') next.cost_per_kg = Math.max(0, numberOr(value, next.cost_per_kg));
+      materialLibrary[key] = next;
+      designHistoryCommit(`material updated: ${next.name}`);
+    }
+
+    function addMaterial(button) {
+      flashButton(button, 'Added');
+      let i = 1;
+      let name = `Custom Material ${i}`;
+      while (materialLibrary[name]) { i++; name = `Custom Material ${i}`; }
+      materialLibrary[name] = normalizeMaterial({ name }, name);
+      renderMaterialLibrary();
+      const select = document.getElementById('material');
+      if (select) select.value = name;
+      designHistoryCommit('material added');
+    }
+
+    function duplicateSelectedMaterial(button) {
+      const spec = selectedMaterialSpec();
+      if (!spec) return;
+      flashButton(button, 'Duplicated');
+      let i = 1;
+      let name = `${spec.name} Copy ${i}`;
+      while (materialLibrary[name]) { i++; name = `${spec.name} Copy ${i}`; }
+      materialLibrary[name] = normalizeMaterial({ ...spec, name }, name);
+      renderMaterialLibrary();
+      const select = document.getElementById('material');
+      if (select) select.value = name;
+      designHistoryCommit('material duplicated');
+    }
+
+    function deleteSelectedMaterial(button) {
+      const select = document.getElementById('material');
+      const name = select?.value;
+      if (!name || !materialLibrary[name]) return;
+      if (Object.keys(materialLibrary).length <= 1) {
+        setAppStatus('At least one material must remain.', true);
+        return;
+      }
+      flashButton(button, 'Deleted');
+      delete materialLibrary[name];
+      renderMaterialLibrary();
+      designHistoryCommit('material deleted');
+    }
+
+    function exportMaterials(button) {
+      flashButton(button, 'Exported');
+      const blob = new Blob([JSON.stringify(materialLibrary, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shaftcad-material-library.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function loadMaterialsFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result);
+          loadMaterialLibraryFromObject(parsed);
+          designHistoryCommit('materials imported');
+          setAppStatus('Material library imported.');
+        } catch (error) {
+          setAppStatus(`Material import failed: ${error.message || String(error)}`, true);
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = '';
     }
 
     function defaultFlagConstraints(flagCount) {
@@ -2154,6 +2347,7 @@ def home() -> str:
     async function run(button) {
       try {
         flashButton(button, 'Analyzing...');
+        const mat = selectedMaterialSpec();
         const params = new URLSearchParams({
           target_cpm: document.getElementById('target').value,
           head_weight_g: document.getElementById('head').value,
@@ -2175,6 +2369,14 @@ def home() -> str:
           cpm_overall_k: document.getElementById('cpmOverallK')?.value || '14.7',
           cpm_zone_k: document.getElementById('cpmZoneK')?.value || '8.5'
         });
+        if (mat) {
+          params.set('material_e1_pa', String(mat.e1_pa));
+          params.set('material_e2_pa', String(mat.e2_pa));
+          params.set('material_g12_pa', String(mat.g12_pa));
+          params.set('material_nu12', String(mat.nu12));
+          params.set('material_density_kg_m3', String(mat.density_kg_m3));
+          params.set('material_cost_per_kg', String(mat.cost_per_kg));
+        }
         const res = await fetch('/api/analyze?' + params.toString());
         if (!res.ok) throw new Error(`Analyze API failed: ${res.status}`);
         latest = engineeringWithTape(await res.json());
@@ -4075,6 +4277,7 @@ ${y2.toFixed(3)}
           manufacturing_method: document.getElementById('method').value
         },
         gcode: latest ? latest.gcode_settings : {},
+        material_library: materialLibrary,
         flags,
         tapes,
         flag_constraints: flagConstraints,
@@ -4108,6 +4311,9 @@ ${y2.toFixed(3)}
           if (project.inputs.architecture_mode) document.getElementById('architectureMode').value = project.inputs.architecture_mode;
           document.getElementById('material').value = project.inputs.material || 'Mitsubishi MR70';
           document.getElementById('method').value = project.inputs.manufacturing_method || 'roll_wrapped';
+        }
+        if (project.material_library && typeof project.material_library === 'object') {
+          loadMaterialLibraryFromObject(project.material_library);
         }
         if (Array.isArray(project.flags)) {
           flags = project.flags.map(normalizeFlag);
@@ -4971,6 +5177,11 @@ method = "${document.getElementById('method').value}"`
         debugAuditBtn: button => runButtonAudit(button),
         exportJsonBtn: button => downloadJson(button),
         exportGcodeBtn: button => downloadGcode(button),
+        materialAddBtn: button => addMaterial(button),
+        materialDuplicateBtn: button => duplicateSelectedMaterial(button),
+        materialDeleteBtn: button => deleteSelectedMaterial(button),
+        materialExportBtn: button => exportMaterials(button),
+        materialImportBtn: () => document.getElementById('materialFile')?.click(),
         fitGenerateBtn: button => runFitToBuild(button),
         fitApplyBtn: button => applyFitToCad(button),
         fitExportBtn: button => downloadFitProfile(button),
@@ -5141,6 +5352,8 @@ method = "${document.getElementById('method').value}"`
     window.flagMouseMove = flagMouseMove;
     window.flagMouseUp = flagMouseUp;
     window.updateFlag = updateFlag;
+    window.updateMaterialField = updateMaterialField;
+    window.loadMaterialsFile = loadMaterialsFile;
     window.downloadFlagJson = downloadFlagJson;
     window.downloadFlagSvg = downloadFlagSvg;
     window.downloadFlagDxf = downloadFlagDxf;
@@ -5193,6 +5406,9 @@ method = "${document.getElementById('method').value}"`
 
     function bootApp() {
       setAppStatus('AE boot starting: wiring controls and running first analysis...');
+      if (!Object.keys(materialLibrary).length) {
+        loadMaterialLibraryFromObject(defaultMaterialLibrary());
+      }
       loadBuildFingerprint();
       renderDebugHealth();
       renderDesignHistory();
@@ -5265,6 +5481,12 @@ def api_analyze(
     cpm_profile_weight_g: float = 255.0,
     cpm_overall_k: float = 14.7,
     cpm_zone_k: float = 8.5,
+    material_e1_pa: float | None = None,
+    material_e2_pa: float | None = None,
+    material_g12_pa: float | None = None,
+    material_nu12: float | None = None,
+    material_density_kg_m3: float | None = None,
+    material_cost_per_kg: float | None = None,
 ) -> dict[str, Any]:
     return analyze_shaft(
         target_cpm=target_cpm,
@@ -5286,6 +5508,12 @@ def api_analyze(
         cpm_profile_weight_g=cpm_profile_weight_g,
         cpm_overall_k=cpm_overall_k,
         cpm_zone_k=cpm_zone_k,
+        material_e1_pa=material_e1_pa,
+        material_e2_pa=material_e2_pa,
+        material_g12_pa=material_g12_pa,
+        material_nu12=material_nu12,
+        material_density_kg_m3=material_density_kg_m3,
+        material_cost_per_kg=material_cost_per_kg,
     )
 
 
