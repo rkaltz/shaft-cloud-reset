@@ -1933,66 +1933,6 @@ def home() -> str:
         }
       });
 
-      // SolveSpace-style sketch entities (2D line command) on top of flag workspace
-      if (sketchLines.length) {
-        ctx.save();
-        ctx.strokeStyle = '#78e3ff';
-        ctx.lineWidth = 2;
-        sketchLines.forEach(line => {
-          ctx.beginPath();
-          ctx.moveTo(line.start.x, line.start.y);
-          ctx.lineTo(line.end.x, line.end.y);
-          ctx.stroke();
-        });
-        ctx.restore();
-      }
-      const sketchIntersections = computeSketchIntersections();
-      if (sketchIntersections.length) {
-        ctx.save();
-        ctx.fillStyle = '#ffd84d';
-        ctx.strokeStyle = '#8a6a00';
-        ctx.lineWidth = 1.5;
-        sketchIntersections.forEach((pt, idx) => {
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, 4.2, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          if (idx < 8) {
-            ctx.fillStyle = '#ffeaa0';
-            ctx.font = '700 10px Arial';
-            ctx.fillText(`I${idx + 1}`, pt.x + 6, pt.y - 6);
-            ctx.fillStyle = '#ffd84d';
-          }
-        });
-        ctx.restore();
-      }
-      if (sketchLinePreview) {
-        ctx.save();
-        ctx.setLineDash([6, 6]);
-        ctx.strokeStyle = '#ff4fa8';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(sketchLinePreview.start.x, sketchLinePreview.start.y);
-        ctx.lineTo(sketchLinePreview.end.x, sketchLinePreview.end.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.restore();
-      }
-      if (sketchSnapPoint) {
-        ctx.save();
-        ctx.strokeStyle = '#30ff7a';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(sketchSnapPoint.x, sketchSnapPoint.y, 5.5, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(sketchSnapPoint.x - 8, sketchSnapPoint.y);
-        ctx.lineTo(sketchSnapPoint.x + 8, sketchSnapPoint.y);
-        ctx.moveTo(sketchSnapPoint.x, sketchSnapPoint.y - 8);
-        ctx.lineTo(sketchSnapPoint.x, sketchSnapPoint.y + 8);
-        ctx.stroke();
-        ctx.restore();
-      }
       return { errors, warnings };
     }
 
@@ -3448,6 +3388,7 @@ def home() -> str:
     function drawFlags() {
       const canvas = document.getElementById('flagCanvas');
       const ctx = canvas.getContext('2d');
+      const sketchIntersections = computeSketchIntersections();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#101918';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -3585,6 +3526,66 @@ def home() -> str:
           );
         }
       });
+
+      // SolveSpace-style sketch entities (2D line command) on top of flag workspace
+      if (sketchLines.length) {
+        ctx.save();
+        ctx.strokeStyle = '#78e3ff';
+        ctx.lineWidth = 2;
+        sketchLines.forEach(line => {
+          ctx.beginPath();
+          ctx.moveTo(line.start.x, line.start.y);
+          ctx.lineTo(line.end.x, line.end.y);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+      if (sketchIntersections.length) {
+        ctx.save();
+        ctx.fillStyle = '#ffd84d';
+        ctx.strokeStyle = '#8a6a00';
+        ctx.lineWidth = 1.5;
+        sketchIntersections.forEach((pt, idx) => {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 4.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (idx < 8) {
+            ctx.fillStyle = '#ffeaa0';
+            ctx.font = '700 10px Arial';
+            ctx.fillText(`I${idx + 1}`, pt.x + 6, pt.y - 6);
+            ctx.fillStyle = '#ffd84d';
+          }
+        });
+        ctx.restore();
+      }
+      if (sketchLinePreview) {
+        ctx.save();
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = '#ff4fa8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sketchLinePreview.start.x, sketchLinePreview.start.y);
+        ctx.lineTo(sketchLinePreview.end.x, sketchLinePreview.end.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+      if (sketchSnapPoint) {
+        ctx.save();
+        ctx.strokeStyle = '#30ff7a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sketchSnapPoint.x, sketchSnapPoint.y, 5.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sketchSnapPoint.x - 8, sketchSnapPoint.y);
+        ctx.lineTo(sketchSnapPoint.x + 8, sketchSnapPoint.y);
+        ctx.moveTo(sketchSnapPoint.x, sketchSnapPoint.y - 8);
+        ctx.lineTo(sketchSnapPoint.x, sketchSnapPoint.y + 8);
+        ctx.stroke();
+        ctx.restore();
+      }
 
       const totalArea = flags.reduce((sum, f) => sum + ((f.root + f.tip) / 2) * f.length, 0);
       const longest = Math.max(...flags.map(f => f.length), 0);
