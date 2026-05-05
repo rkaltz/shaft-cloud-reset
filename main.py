@@ -506,6 +506,7 @@ def home() -> str:
     .build-badge { border: 1px solid #4e7f76; color: #d7fff6; padding: 7px 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
     .app-status { background: #d7fff6; color: #17211f; border-bottom: 1px solid #9fc8c0; padding: 8px 18px; font-size: 13px; font-weight: 800; }
     .app-status.bad { background: #ffe1df; color: #8a1f16; border-color: #df9b95; }
+    .viewer-note { color: #8a4d00; font-weight: 700; margin-left: 8px; }
     main { display: grid; grid-template-columns: 340px 1fr; gap: 0; min-height: calc(100vh - 111px); }
     section { background: #f8fbfa; border-right: 1px solid #b9c8c4; padding: 16px; }
     section.workspace { background: #eef2f0; border-right: 0; padding: 0; }
@@ -594,6 +595,13 @@ def home() -> str:
     .stack-summary { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; }
     .stack-summary h3 { margin-top: 0; }
     pre { background: #17211f; color: #d7fff6; padding: 12px; border-radius: 8px; max-height: 300px; overflow: auto; }
+    .viewer-mode input,
+    .viewer-mode select,
+    .viewer-mode textarea,
+    .viewer-mode button.viewer-locked {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
     @media (max-width: 900px) { main, .grid2 { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
@@ -710,6 +718,8 @@ def home() -> str:
             <table><tbody id="launch"></tbody></table>
             <h3>Engineering Analytics</h3>
             <table><tbody id="analytics"></tbody></table>
+            <h3>Export Validation</h3>
+            <table><tbody id="validationReadout"></tbody></table>
           </div>
         </div>
         <h3>Experimental / Manufacturing Library</h3>
@@ -814,6 +824,36 @@ def home() -> str:
           <label><input id="lockDimensions" type="checkbox" onchange="drawFlags()"> Lock dimensions</label>
           <span id="selectedFlagLabel">No flag selected</span>
         </div>
+        <div class="tool-row">
+          <button id="constraintSelHorizontalBtn" class="secondary" onclick="applySelectedConstraint('horizontal', this)">Horizontal</button>
+          <button id="constraintSelVerticalBtn" class="secondary" onclick="applySelectedConstraint('vertical', this)">Vertical</button>
+          <button id="constraintSelLengthBtn" class="secondary" onclick="applySelectedConstraint('length', this)">Set Length</button>
+          <button id="constraintSelAngleBtn" class="secondary" onclick="applySelectedConstraint('angle', this)">Set Angle</button>
+          <input id="constraintValueInput" type="number" step="0.1" value="0" title="Constraint value (length mm or angle deg)">
+        </div>
+        <div class="tool-row">
+          <button id="flagPrevBtn" class="secondary" onclick="selectAdjacentFlag(-1, this)">Prev Flag</button>
+          <button id="flagNextBtn" class="secondary" onclick="selectAdjacentFlag(1, this)">Next Flag</button>
+          <button id="flagDuplicateBtn" class="secondary" onclick="duplicateSelectedFlag(this)">Duplicate</button>
+          <button id="flagDeleteSelectedBtn" class="secondary" onclick="deleteSelectedFlag(this)">Delete Selected</button>
+          <button id="flagMirrorAngleBtn" class="secondary" onclick="mirrorSelectedFlagAngle(this)">Mirror Angle</button>
+        </div>
+        <div class="tool-row">
+          <button id="constraintApplyBtn" class="secondary" onclick="applyFlagConstraints(this)">Apply Constraints</button>
+          <button id="constraintResetBtn" class="secondary" onclick="resetFlagConstraints(this)">Reset Constraints</button>
+        </div>
+        <h3>Constraint Set</h3>
+        <table class="editable-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Scope</th>
+              <th>Value</th>
+              <th>Enabled</th>
+            </tr>
+          </thead>
+          <tbody id="constraintRows"></tbody>
+        </table>
         <div class="tool-row">
           <button id="flagAddBtn" onclick="addFlag(this)">Add Flag</button>
           <button id="flagTriangleBtn" onclick="addTriangleFlag(this)">Add Triangle</button>
@@ -978,6 +1018,9 @@ def home() -> str:
     let selectedFlagIndex = null;
     let sketchTool = 'select';
     let latestFitProfile = null;
+    let flagConstraints = defaultFlagConstraints(defaultFlags().length);
+    const APP_MODE = new URLSearchParams(window.location.search).get('mode') === 'viewer' ? 'viewer' : 'edit';
+    const VIEWER_ALLOWED_BUTTON_IDS = new Set(['simTab', 'fitTab', 'drawTab', 'flagTab', 'tapeTab', 'stackTab', 'cad3dTab']);
     const ARCHITECTURES = {
       flag_wrap: {
         name: 'Flag wrap',
@@ -1024,6 +1067,32 @@ def home() -> str:
       status.classList.toggle('bad', Boolean(isBad));
     }
 
+    function isViewerMode() {
+      return APP_MODE === 'viewer';
+    }
+
+    function applyViewerMode() {
+      if (!isViewerMode()) return;
+      document.body.classList.add('viewer-mode');
+      const badge = document.querySelector('.build-badge');
+      if (badge) badge.innerHTML += '<span class="viewer-note">Viewer Mode</span>';
+
+      document.querySelectorAll('input, select, textarea').forEach(element => {
+        element.disabled = true;
+      });
+
+      document.querySelectorAll('button').forEach(button => {
+        if (!VIEWER_ALLOWED_BUTTON_IDS.has(button.id)) {
+          button.disabled = true;
+          button.classList.add('viewer-locked');
+        }
+      });
+
+      const projectFile = document.getElementById('projectFile');
+      if (projectFile) projectFile.disabled = true;
+      setAppStatus('Viewer mode active: edits and exports are locked.');
+    }
+
     window.onerror = function(message, source, line, column) {
       setAppStatus(`JavaScript crashed: ${message} at ${line}:${column}`, true);
       const consolePanel = document.getElementById('cadConsole');
@@ -1057,6 +1126,223 @@ def home() -> str:
         {name: 'Mid -45 torque tape', startIn: 26, length: 220, width: 10, thickness: 0.125, angle: -45, layer: 'over inner braid'},
         {name: 'Tip hoop support', startIn: 16, length: 150, width: 8, thickness: 0.125, angle: 90, layer: 'under outer braid'}
       ];
+    }
+
+    function numberOr(value, fallback) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function defaultFlagConstraints(flagCount) {
+      const constraints = [
+        { id: 'length_step', type: 'length_step', scope: 'all flags', value: 5, enabled: true },
+        { id: 'min_tip_ratio', type: 'min_tip_ratio', scope: 'all flags', value: 0.35, enabled: true },
+        { id: 'bias_pair_angle_abs', type: 'bias_pair_angle_abs', scope: 'bias layers', value: 45, enabled: true }
+      ];
+      for (let i = 0; i < flagCount; i++) {
+        constraints.push({ id: `flag_${i}_horizontal`, type: 'horizontal', scope: `flag ${i + 1}`, value: 1, enabled: true });
+      }
+      return constraints;
+    }
+
+    function ensureConstraintCoverage() {
+      const hasGlobal = flagConstraints.some(c => c.type === 'length_step');
+      if (!hasGlobal) {
+        flagConstraints = defaultFlagConstraints(flags.length);
+      }
+      for (let i = 0; i < flags.length; i++) {
+        const id = `flag_${i}_horizontal`;
+        if (!flagConstraints.some(c => c.id === id)) {
+          flagConstraints.push({ id, type: 'horizontal', scope: `flag ${i + 1}`, value: 1, enabled: true });
+        }
+      }
+    }
+
+    function normalizeFlag(flag) {
+      return {
+        ...flag,
+        length: Math.max(60, numberOr(flag.length, 320)),
+        root: Math.max(8, numberOr(flag.root, 70)),
+        tip: Math.max(4, numberOr(flag.tip, 40)),
+        angle: Math.max(-89, Math.min(89, numberOr(flag.angle, 0))),
+        name: String(flag.name || 'Flag'),
+        station: String(flag.station || 'Custom'),
+        layer: String(flag.layer || 'custom'),
+        locked: Boolean(flag.locked)
+      };
+    }
+
+    function normalizeFlags() {
+      flags = flags.map(normalizeFlag);
+    }
+
+    function renderConstraintTable() {
+      ensureConstraintCoverage();
+      const rows = flagConstraints.map((constraint, index) => `
+        <tr>
+          <td>${constraint.type}</td>
+          <td>${constraint.scope}</td>
+          <td><input type="number" step="0.01" value="${constraint.value}" onchange="updateConstraint(${index}, 'value', this.value)"></td>
+          <td><input type="checkbox" ${constraint.enabled ? 'checked' : ''} onchange="updateConstraint(${index}, 'enabled', this.checked)"></td>
+        </tr>
+      `).join('');
+      const tbody = document.getElementById('constraintRows');
+      if (tbody) tbody.innerHTML = rows;
+    }
+
+    function updateConstraint(index, key, value) {
+      if (!flagConstraints[index]) return;
+      if (key === 'enabled') {
+        flagConstraints[index][key] = Boolean(value);
+      } else if (key === 'value') {
+        flagConstraints[index][key] = numberOr(value, flagConstraints[index][key]);
+      } else {
+        flagConstraints[index][key] = value;
+      }
+      drawFlags();
+    }
+
+    function selectedConstraintValue() {
+      return numberOr(document.getElementById('constraintValueInput')?.value, 0);
+    }
+
+    function clearFlagConstraintByType(flagIndex, type) {
+      let changed = false;
+      flagConstraints.forEach(constraint => {
+        if (constraint.id === `flag_${flagIndex}_${type}` && constraint.enabled) {
+          constraint.enabled = false;
+          changed = true;
+        }
+      });
+      return changed;
+    }
+
+    function upsertFlagConstraint(flagIndex, type, value, enabled, scope) {
+      const id = `flag_${flagIndex}_${type}`;
+      const existing = flagConstraints.find(c => c.id === id);
+      if (existing) {
+        existing.value = numberOr(value, existing.value);
+        existing.enabled = Boolean(enabled);
+        existing.scope = scope || existing.scope;
+        return existing;
+      }
+      const created = {
+        id,
+        type,
+        scope: scope || `flag ${flagIndex + 1}`,
+        value: numberOr(value, 0),
+        enabled: Boolean(enabled)
+      };
+      flagConstraints.push(created);
+      return created;
+    }
+
+    function applySelectedConstraint(type, button) {
+      if (selectedFlagIndex === null || !flags[selectedFlagIndex]) {
+        setAppStatus('Select a flag first, then apply a constraint.', true);
+        writeCadConsole('Constraint action blocked: no selected flag.');
+        return;
+      }
+      flashButton(button, 'Applied');
+      const flag = flags[selectedFlagIndex];
+      const value = selectedConstraintValue();
+      let conflictNote = '';
+
+      if (type === 'horizontal') {
+        if (clearFlagConstraintByType(selectedFlagIndex, 'angle')) {
+          conflictNote = 'Angle constraint disabled due to horizontal lock.';
+        }
+        upsertFlagConstraint(selectedFlagIndex, 'horizontal', 1, true, `${flag.name} horizontal`);
+      } else if (type === 'vertical') {
+        upsertFlagConstraint(selectedFlagIndex, 'vertical', 1, true, `${flag.name} vertical`);
+      } else if (type === 'length') {
+        if (value <= 0) {
+          setAppStatus('Length constraint must be greater than 0.', true);
+          return;
+        }
+        upsertFlagConstraint(selectedFlagIndex, 'length', value, true, `${flag.name} length`);
+      } else if (type === 'angle') {
+        const clamped = Math.max(-89, Math.min(89, value));
+        if (clearFlagConstraintByType(selectedFlagIndex, 'horizontal')) {
+          conflictNote = 'Horizontal constraint disabled due to explicit angle.';
+        }
+        upsertFlagConstraint(selectedFlagIndex, 'angle', clamped, true, `${flag.name} angle`);
+      }
+
+      if (conflictNote) writeCadConsole(conflictNote);
+      applyFlagConstraints();
+      renderConstraintTable();
+      drawFlags();
+    }
+
+    function applyFlagConstraints(button) {
+      if (button) flashButton(button, 'Applied');
+      normalizeFlags();
+      ensureConstraintCoverage();
+      let adjustments = 0;
+      const byType = type => flagConstraints.find(c => c.type === type && c.enabled);
+      const lengthStep = byType('length_step');
+      const minTipRatio = byType('min_tip_ratio');
+      const biasAbs = byType('bias_pair_angle_abs');
+
+      flags = flags.map((flag, index) => {
+        let next = normalizeFlag(flag);
+        if (lengthStep && lengthStep.value > 0) {
+          const snapped = Math.round(next.length / lengthStep.value) * lengthStep.value;
+          if (snapped !== next.length) adjustments++;
+          next.length = Math.max(60, snapped);
+        }
+        if (minTipRatio && minTipRatio.value > 0) {
+          const minTip = next.root * minTipRatio.value;
+          if (next.tip < minTip) {
+            next.tip = Math.max(4, minTip);
+            adjustments++;
+          }
+        }
+        const h = flagConstraints.find(c => c.id === `flag_${index}_horizontal` && c.enabled);
+        if (h && next.angle !== 0) {
+          next.angle = 0;
+          adjustments++;
+        }
+        const explicitAngle = flagConstraints.find(c => c.id === `flag_${index}_angle` && c.enabled);
+        if (explicitAngle) {
+          const angleTarget = Math.max(-89, Math.min(89, numberOr(explicitAngle.value, next.angle)));
+          if (next.angle !== angleTarget) {
+            next.angle = angleTarget;
+            adjustments++;
+          }
+        }
+        const explicitLength = flagConstraints.find(c => c.id === `flag_${index}_length` && c.enabled);
+        if (explicitLength) {
+          const lenTarget = Math.max(60, numberOr(explicitLength.value, next.length));
+          if (next.length !== lenTarget) {
+            next.length = lenTarget;
+            adjustments++;
+          }
+        }
+        if (biasAbs && next.layer.toLowerCase().includes('bias')) {
+          const target = Math.abs(biasAbs.value);
+          const sign = next.angle < 0 ? -1 : 1;
+          const angled = sign * target;
+          if (next.angle !== angled) {
+            next.angle = angled;
+            adjustments++;
+          }
+        }
+        return next;
+      });
+      updateFlagTableValues();
+      drawFlags();
+      writeCadConsole(`Constraint solver applied (${adjustments} adjustment${adjustments === 1 ? '' : 's'}).`);
+      setAppStatus(`Constraint solver applied: ${adjustments} adjustment${adjustments === 1 ? '' : 's'}.`);
+    }
+
+    function resetFlagConstraints(button) {
+      flashButton(button, 'Reset');
+      flagConstraints = defaultFlagConstraints(flags.length);
+      renderConstraintTable();
+      drawFlags();
+      writeCadConsole('Constraint set reset to defaults.');
     }
 
     function showView(viewName) {
@@ -1099,6 +1385,7 @@ def home() -> str:
     }
 
     function setSketchTool(tool, button) {
+      if (isViewerMode()) return;
       sketchTool = tool;
       document.querySelectorAll('.cad-tool, .sketch-icon').forEach(item => item.classList.remove('active'));
       if (button) button.classList.add('active');
@@ -1188,6 +1475,7 @@ def home() -> str:
       renderTapeCad();
       renderStackCad();
       drawCad3d();
+      updateValidationReadout();
       writeCadConsole('Analysis complete. CadQuery STEP recipe ready for export.');
     }
 
@@ -1412,6 +1700,10 @@ def home() -> str:
     }
 
     function renderFlagEditor() {
+      normalizeFlags();
+      ensureConstraintCoverage();
+      if (selectedFlagIndex !== null && selectedFlagIndex >= flags.length) selectedFlagIndex = flags.length - 1;
+      if (flags.length === 0) selectedFlagIndex = null;
       document.getElementById('flagRows').innerHTML = flags.map((flag, index) => `
         <tr>
           <td><input id="flagName${index}" value="${flag.name}" onchange="updateFlag(${index}, 'name', this.value)"></td>
@@ -1424,7 +1716,67 @@ def home() -> str:
           <td><button class="secondary" onclick="deleteFlag(${index}, this)">Delete</button></td>
         </tr>
       `).join('');
+      renderConstraintTable();
       drawFlags();
+    }
+
+    function requireSelectedFlag(actionName) {
+      if (selectedFlagIndex === null || !flags[selectedFlagIndex]) {
+        setAppStatus(`${actionName} blocked: select a flag first.`, true);
+        writeCadConsole(`${actionName} blocked: no selected flag.`);
+        return false;
+      }
+      return true;
+    }
+
+    function selectAdjacentFlag(step, button) {
+      if (!flags.length) return;
+      if (button) flashButton(button, 'Selected');
+      if (selectedFlagIndex === null) {
+        selectedFlagIndex = step >= 0 ? 0 : flags.length - 1;
+      } else {
+        const next = selectedFlagIndex + step;
+        selectedFlagIndex = ((next % flags.length) + flags.length) % flags.length;
+      }
+      drawFlags();
+    }
+
+    function duplicateSelectedFlag(button) {
+      if (!requireSelectedFlag('Duplicate flag')) return;
+      flashButton(button, 'Duplicated');
+      const source = normalizeFlag(flags[selectedFlagIndex]);
+      const clone = {
+        ...source,
+        name: `${source.name} copy`,
+        station: source.station || 'Custom'
+      };
+      flags.splice(selectedFlagIndex + 1, 0, clone);
+      selectedFlagIndex += 1;
+      flagConstraints = defaultFlagConstraints(flags.length);
+      renderFlagEditor();
+      writeCadConsole(`Duplicated flag: ${source.name}`);
+    }
+
+    function deleteSelectedFlag(button) {
+      if (!requireSelectedFlag('Delete selected flag')) return;
+      flashButton(button, 'Deleted');
+      const removed = flags[selectedFlagIndex];
+      flags.splice(selectedFlagIndex, 1);
+      if (flags.length === 0) selectedFlagIndex = null;
+      else selectedFlagIndex = Math.min(selectedFlagIndex, flags.length - 1);
+      flagConstraints = defaultFlagConstraints(flags.length);
+      renderFlagEditor();
+      writeCadConsole(`Deleted selected flag: ${removed.name}`);
+    }
+
+    function mirrorSelectedFlagAngle(button) {
+      if (!requireSelectedFlag('Mirror angle')) return;
+      flashButton(button, 'Mirrored');
+      const flag = flags[selectedFlagIndex];
+      flag.angle = -numberOr(flag.angle, 0);
+      updateFlagTableValues();
+      drawFlags();
+      writeCadConsole(`Mirrored angle for ${flag.name} to ${flag.angle} deg.`);
     }
 
     function updateFlagTableValues() {
@@ -1442,34 +1794,39 @@ def home() -> str:
 
     function updateFlag(index, key, value) {
       if (['length', 'root', 'tip', 'angle'].includes(key)) {
-        flags[index][key] = Number(value);
+        flags[index][key] = numberOr(value, flags[index][key]);
       } else {
         flags[index][key] = value;
       }
+      flags[index] = normalizeFlag(flags[index]);
       drawFlags();
     }
 
     function addFlag(button) {
       flashButton(button, 'Added');
       flags.push({name: 'New flag', length: 320, root: 70, tip: 48, angle: 0, station: 'Custom', layer: 'custom', locked: false});
+      ensureConstraintCoverage();
       renderFlagEditor();
     }
 
     function addTriangleFlag(button) {
       flashButton(button, 'Added');
       flags.push({name: 'Triangle bias flag', length: 340, root: 76, tip: 4, angle: 45, station: 'Custom', layer: 'bias', locked: false});
+      ensureConstraintCoverage();
       renderFlagEditor();
     }
 
     function deleteFlag(index, button) {
       flashButton(button, 'Deleted');
       flags.splice(index, 1);
+      flagConstraints = defaultFlagConstraints(flags.length);
       renderFlagEditor();
     }
 
     function resetFlags(button) {
       flashButton(button, 'Reset');
       flags = defaultFlags();
+      flagConstraints = defaultFlagConstraints(flags.length);
       renderFlagEditor();
     }
 
@@ -1504,6 +1861,7 @@ def home() -> str:
     }
 
     function flagMouseDown(event) {
+      if (isViewerMode()) return;
       const point = canvasPoint(event);
       let best = null;
       flagGeometry.forEach((geometry, flagIndex) => {
@@ -1526,6 +1884,7 @@ def home() -> str:
     }
 
     function flagMouseMove(event) {
+      if (isViewerMode()) return;
       if (!activeDrag) return;
       const point = canvasPoint(event);
       const geometry = flagGeometry[activeDrag.flagIndex];
@@ -1550,6 +1909,7 @@ def home() -> str:
     }
 
     function flagMouseUp() {
+      if (isViewerMode()) return;
       activeDrag = null;
     }
 
@@ -1705,6 +2065,7 @@ def home() -> str:
           ? `Tool: ${sketchTool}`
           : `${flags[selectedFlagIndex].name} | L ${flags[selectedFlagIndex].length} | root ${flags[selectedFlagIndex].root} | tip ${flags[selectedFlagIndex].tip}`;
       }
+      updateValidationReadout();
     }
 
     function flagSvgText() {
@@ -1722,6 +2083,7 @@ def home() -> str:
     }
 
     function downloadFlagJson(button) {
+      if (!ensureExportReady('Flag JSON export', false)) return;
       flashButton(button, 'Exported');
       const blob = new Blob([JSON.stringify({flags}, null, 2)], {type: 'application/json'});
       const url = URL.createObjectURL(blob);
@@ -1733,6 +2095,7 @@ def home() -> str:
     }
 
     function downloadFlagSvg(button) {
+      if (!ensureExportReady('Flag SVG export', false)) return;
       flashButton(button, 'Exported');
       const blob = new Blob([flagSvgText()], {type: 'image/svg+xml'});
       const url = URL.createObjectURL(blob);
@@ -1785,6 +2148,7 @@ ${y2.toFixed(3)}
     }
 
     function downloadFlagDxf(button) {
+      if (!ensureExportReady('Flag DXF export', false)) return;
       flashButton(button, 'Exported');
       const blob = new Blob([flagDxfText()], {type: 'application/dxf'});
       const url = URL.createObjectURL(blob);
@@ -1946,6 +2310,7 @@ ${y2.toFixed(3)}
       stackLayers = generatedStackLayers();
       renderStackCad();
       drawCad3d();
+      updateValidationReadout();
     }
 
     function renderTapeCad() {
@@ -1985,6 +2350,7 @@ ${y2.toFixed(3)}
       stackLayers = generatedStackLayers();
       renderStackCad();
       drawCad3d();
+      updateValidationReadout();
     }
 
     function addTape(button) {
@@ -1995,6 +2361,7 @@ ${y2.toFixed(3)}
       stackLayers = generatedStackLayers();
       renderStackCad();
       drawCad3d();
+      updateValidationReadout();
     }
 
     function addBiasTapePair(button) {
@@ -2006,6 +2373,7 @@ ${y2.toFixed(3)}
       stackLayers = generatedStackLayers();
       renderStackCad();
       drawCad3d();
+      updateValidationReadout();
     }
 
     function deleteTape(index, button) {
@@ -2016,6 +2384,7 @@ ${y2.toFixed(3)}
       stackLayers = generatedStackLayers();
       renderStackCad();
       drawCad3d();
+      updateValidationReadout();
     }
 
     function resetTapes(button) {
@@ -2026,6 +2395,7 @@ ${y2.toFixed(3)}
       stackLayers = generatedStackLayers();
       renderStackCad();
       drawCad3d();
+      updateValidationReadout();
     }
 
     function tapeColor(angle) {
@@ -2119,6 +2489,7 @@ ${y2.toFixed(3)}
     }
 
     function downloadTapeJson(button) {
+      if (!ensureExportReady('Tape JSON export', false)) return;
       flashButton(button, 'Exported');
       const payload = {
         module: 'TapeCAD',
@@ -2305,6 +2676,7 @@ ${y2.toFixed(3)}
     }
 
     function downloadStackJson(button) {
+      if (!ensureExportReady('Stack JSON export', false)) return;
       flashButton(button, 'Exported');
       const blob = new Blob([JSON.stringify(stackPayload(), null, 2)], {type: 'application/json'});
       const url = URL.createObjectURL(blob);
@@ -2334,6 +2706,7 @@ ${y2.toFixed(3)}
     }
 
     function downloadBuildSheet(button) {
+      if (!ensureExportReady('Build sheet export', false)) return;
       flashButton(button, 'Exported');
       const blob = new Blob([buildSheetText()], {type: 'text/plain'});
       const url = URL.createObjectURL(blob);
@@ -2360,11 +2733,13 @@ ${y2.toFixed(3)}
         gcode: latest ? latest.gcode_settings : {},
         flags,
         tapes,
+        flag_constraints: flagConstraints,
         stack_layers: ensureStackLayers()
       };
     }
 
     function downloadProject(button) {
+      if (!ensureExportReady('Project save', false)) return;
       flashButton(button, 'Saved');
       const blob = new Blob([JSON.stringify(currentProject(), null, 2)], {type: 'application/json'});
       const url = URL.createObjectURL(blob);
@@ -2391,8 +2766,21 @@ ${y2.toFixed(3)}
           document.getElementById('method').value = project.inputs.manufacturing_method || 'roll_wrapped';
         }
         if (Array.isArray(project.flags)) {
-          flags = project.flags;
+          flags = project.flags.map(normalizeFlag);
+          flagConstraints = defaultFlagConstraints(flags.length);
           renderFlagEditor();
+        }
+        if (Array.isArray(project.flag_constraints)) {
+          flagConstraints = project.flag_constraints.map(item => ({
+            id: String(item.id || ''),
+            type: String(item.type || 'custom'),
+            scope: String(item.scope || 'all flags'),
+            value: numberOr(item.value, 0),
+            enabled: Boolean(item.enabled)
+          }));
+          ensureConstraintCoverage();
+          renderConstraintTable();
+          drawFlags();
         }
         if (Array.isArray(project.tapes)) {
           tapes = project.tapes;
@@ -2561,6 +2949,86 @@ method = "${document.getElementById('method').value}"`
         ['Flags', flags.length]
       ];
       inspector.innerHTML = rows.map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
+    }
+
+    function collectValidationIssues(requireLatest) {
+      const errors = [];
+      const warnings = [];
+      if (requireLatest && !latest) {
+        errors.push('Run Analyze Shaft before manufacturing export.');
+      }
+      if (!Array.isArray(flags) || flags.length === 0) {
+        errors.push('At least one flag is required.');
+      }
+      flags.forEach((flag, index) => {
+        const name = flag?.name || `Flag ${index + 1}`;
+        const length = numberOr(flag?.length, NaN);
+        const root = numberOr(flag?.root, NaN);
+        const tip = numberOr(flag?.tip, NaN);
+        const angle = numberOr(flag?.angle, NaN);
+        if (!Number.isFinite(length) || length <= 0) errors.push(`${name}: length must be > 0.`);
+        if (!Number.isFinite(root) || root <= 0) errors.push(`${name}: root width must be > 0.`);
+        if (!Number.isFinite(tip) || tip <= 0) errors.push(`${name}: tip width must be > 0.`);
+        if (Number.isFinite(root) && Number.isFinite(tip) && tip > root * 1.35) {
+          warnings.push(`${name}: tip is unusually large versus root.`);
+        }
+        if (!Number.isFinite(angle) || angle < -89 || angle > 89) {
+          errors.push(`${name}: angle must stay between -89 and 89 deg.`);
+        }
+      });
+
+      tapes.forEach((tape, index) => {
+        const name = tape?.name || `Tape ${index + 1}`;
+        const startIn = numberOr(tape?.startIn, NaN);
+        const length = numberOr(tape?.length, NaN);
+        const width = numberOr(tape?.width, NaN);
+        const thickness = numberOr(tape?.thickness, NaN);
+        if (!Number.isFinite(startIn) || startIn < 11 || startIn > 41) errors.push(`${name}: start station must be 11-41 in.`);
+        if (!Number.isFinite(length) || length <= 0) errors.push(`${name}: length must be > 0.`);
+        if (!Number.isFinite(width) || width <= 0) errors.push(`${name}: width must be > 0.`);
+        if (!Number.isFinite(thickness) || thickness <= 0) errors.push(`${name}: thickness must be > 0.`);
+      });
+
+      const hasBiasConstraint = flagConstraints.some(c => c.enabled && c.type === 'bias_pair_angle_abs');
+      const hasHorizontalBias = flags.some((flag, index) => {
+        const h = flagConstraints.find(c => c.id === `flag_${index}_horizontal` && c.enabled);
+        return h && String(flag.layer || '').toLowerCase().includes('bias');
+      });
+      if (hasBiasConstraint && hasHorizontalBias) {
+        warnings.push('Bias angle constraint and horizontal bias constraint are both active.');
+      }
+      return { errors, warnings };
+    }
+
+    function updateValidationReadout() {
+      const tbody = document.getElementById('validationReadout');
+      if (!tbody) return;
+      const state = collectValidationIssues(false);
+      const rows = [];
+      rows.push(['Errors', String(state.errors.length)]);
+      rows.push(['Warnings', String(state.warnings.length)]);
+      if (state.errors.length === 0) rows.push(['Status', 'Ready for export']);
+      if (state.errors.length > 0) {
+        state.errors.slice(0, 4).forEach(message => rows.push(['Error', message]));
+      }
+      if (state.warnings.length > 0) {
+        state.warnings.slice(0, 4).forEach(message => rows.push(['Warning', message]));
+      }
+      tbody.innerHTML = rows.map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
+    }
+
+    function ensureExportReady(actionName, requireLatest) {
+      const state = collectValidationIssues(requireLatest);
+      updateValidationReadout();
+      if (state.errors.length > 0) {
+        setAppStatus(`${actionName} blocked: ${state.errors[0]}`, true);
+        writeCadConsole(`${actionName} blocked. ${state.errors.length} validation error(s).`);
+        return false;
+      }
+      if (state.warnings.length > 0) {
+        writeCadConsole(`${actionName}: warning(s) present (${state.warnings.length}). Proceeding.`);
+      }
+      return true;
     }
 
     function shaftRadiusAt(t, butt, tip) {
@@ -2754,6 +3222,7 @@ method = "${document.getElementById('method').value}"`
     }
 
     function downloadCadScript(button) {
+      if (!ensureExportReady('CAD export', true)) return;
       flashButton(button, 'Exported');
       const exportType = document.getElementById('cadExportType').value;
       let content = shaftCadScript();
@@ -2779,7 +3248,7 @@ method = "${document.getElementById('method').value}"`
     }
 
     function downloadJson(button) {
-      if (!latest) return;
+      if (!ensureExportReady('Analysis JSON export', true)) return;
       flashButton(button, 'Exported');
       const blob = new Blob([JSON.stringify(latest, null, 2)], {type: 'application/json'});
       const url = URL.createObjectURL(blob);
@@ -2791,7 +3260,7 @@ method = "${document.getElementById('method').value}"`
     }
 
     function downloadGcode(button) {
-      if (!latest) return;
+      if (!ensureExportReady('Mandrel G-code export', true)) return;
       flashButton(button, 'Exported');
       const blob = new Blob([latest.gcode], {type: 'text/plain'});
       const url = URL.createObjectURL(blob);
@@ -2803,6 +3272,10 @@ method = "${document.getElementById('method').value}"`
     }
 
     function safeInvoke(name, callback) {
+      if (isViewerMode() && !VIEWER_ALLOWED_BUTTON_IDS.has(name)) {
+        setAppStatus('Viewer mode active: this action is locked.');
+        return;
+      }
       try {
         const result = callback();
         if (result && typeof result.catch === 'function') {
@@ -2848,6 +3321,17 @@ method = "${document.getElementById('method').value}"`
         flagJsonBtn: button => downloadFlagJson(button),
         flagSvgBtn: button => downloadFlagSvg(button),
         flagDxfBtn: button => downloadFlagDxf(button),
+        constraintSelHorizontalBtn: button => applySelectedConstraint('horizontal', button),
+        constraintSelVerticalBtn: button => applySelectedConstraint('vertical', button),
+        constraintSelLengthBtn: button => applySelectedConstraint('length', button),
+        constraintSelAngleBtn: button => applySelectedConstraint('angle', button),
+        flagPrevBtn: button => selectAdjacentFlag(-1, button),
+        flagNextBtn: button => selectAdjacentFlag(1, button),
+        flagDuplicateBtn: button => duplicateSelectedFlag(button),
+        flagDeleteSelectedBtn: button => deleteSelectedFlag(button),
+        flagMirrorAngleBtn: button => mirrorSelectedFlagAngle(button),
+        constraintApplyBtn: button => applyFlagConstraints(button),
+        constraintResetBtn: button => resetFlagConstraints(button),
         projectSaveBtn: button => downloadProject(button),
         projectLoadBtn: () => document.getElementById('projectFile')?.click(),
         tapeAddBtn: button => addTape(button),
@@ -2902,6 +3386,15 @@ method = "${document.getElementById('method').value}"`
     window.downloadFlagJson = downloadFlagJson;
     window.downloadFlagSvg = downloadFlagSvg;
     window.downloadFlagDxf = downloadFlagDxf;
+    window.renderConstraintTable = renderConstraintTable;
+    window.updateConstraint = updateConstraint;
+    window.applySelectedConstraint = applySelectedConstraint;
+    window.selectAdjacentFlag = selectAdjacentFlag;
+    window.duplicateSelectedFlag = duplicateSelectedFlag;
+    window.deleteSelectedFlag = deleteSelectedFlag;
+    window.mirrorSelectedFlagAngle = mirrorSelectedFlagAngle;
+    window.applyFlagConstraints = applyFlagConstraints;
+    window.resetFlagConstraints = resetFlagConstraints;
     window.downloadProject = downloadProject;
     window.loadProjectFile = loadProjectFile;
     window.renderTapeCad = renderTapeCad;
@@ -2926,9 +3419,12 @@ method = "${document.getElementById('method').value}"`
 
     function bootApp() {
       setAppStatus('AE boot starting: wiring controls and running first analysis...');
+      applyViewerMode();
       bootstrapButtons();
       run().then(() => {
-        setAppStatus('AE boot OK: controls are live. If a button fails now, the status bar will show the exact error.');
+        if (!isViewerMode()) {
+          setAppStatus('AE boot OK: controls are live. If a button fails now, the status bar will show the exact error.');
+        }
       }).catch(error => {
         setAppStatus(`Startup analysis failed: ${error.message || String(error)}`, true);
         writeCadConsole(error.message || String(error));
