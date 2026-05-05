@@ -1305,6 +1305,7 @@ def home() -> str:
     let sketchLines = [];
     let sketchLineStart = null;
     let sketchLinePreview = null;
+    let sketchSnapPoint = null;
     let sketchTool = 'select';
     let latestFitProfile = null;
     let fitCadBridge = null;
@@ -1752,6 +1753,26 @@ def home() -> str:
         });
         ctx.restore();
       }
+      const sketchIntersections = computeSketchIntersections();
+      if (sketchIntersections.length) {
+        ctx.save();
+        ctx.fillStyle = '#ffd84d';
+        ctx.strokeStyle = '#8a6a00';
+        ctx.lineWidth = 1.5;
+        sketchIntersections.forEach((pt, idx) => {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 4.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (idx < 8) {
+            ctx.fillStyle = '#ffeaa0';
+            ctx.font = '700 10px Arial';
+            ctx.fillText(`I${idx + 1}`, pt.x + 6, pt.y - 6);
+            ctx.fillStyle = '#ffd84d';
+          }
+        });
+        ctx.restore();
+      }
       if (sketchLinePreview) {
         ctx.save();
         ctx.setLineDash([6, 6]);
@@ -1762,6 +1783,21 @@ def home() -> str:
         ctx.lineTo(sketchLinePreview.end.x, sketchLinePreview.end.y);
         ctx.stroke();
         ctx.setLineDash([]);
+        ctx.restore();
+      }
+      if (sketchSnapPoint) {
+        ctx.save();
+        ctx.strokeStyle = '#30ff7a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sketchSnapPoint.x, sketchSnapPoint.y, 5.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(sketchSnapPoint.x - 8, sketchSnapPoint.y);
+        ctx.lineTo(sketchSnapPoint.x + 8, sketchSnapPoint.y);
+        ctx.moveTo(sketchSnapPoint.x, sketchSnapPoint.y - 8);
+        ctx.lineTo(sketchSnapPoint.x, sketchSnapPoint.y + 8);
+        ctx.stroke();
         ctx.restore();
       }
       return { errors, warnings };
@@ -2058,6 +2094,7 @@ def home() -> str:
       if (tool !== 'line') {
         sketchLineStart = null;
         sketchLinePreview = null;
+        sketchSnapPoint = null;
       } else {
         setAppStatus('LINE mode active: click first point.');
       }
@@ -2088,6 +2125,14 @@ def home() -> str:
         writeCadConsole('Sketch menu: Constrain -> applied active constraints.');
       } else if (action === 'analyze') {
         run();
+        const hits = computeSketchIntersections();
+        if (hits.length) {
+          writeCadConsole(`Sketch intersections: ${hits.length} hit(s).`);
+          setAppStatus(`Sketch analyze: ${hits.length} intersection(s) found.`);
+        } else {
+          writeCadConsole('Sketch intersections: none.');
+          setAppStatus('Sketch analyze: no line intersections found.');
+        }
         writeCadConsole('Sketch menu: Analyze -> shaft analysis started.');
       } else if (action === 'help') {
         setAppStatus('Sketch help: select flag, drag corner or L/R/T handles, then apply constraints.');
@@ -2946,6 +2991,64 @@ def home() -> str:
       return ['top', 'right', 'bottom', 'left'][edgeIndex] || 'edge';
     }
 
+    // 2D line-segment intersection kernel (SolveSpace/CAD style math)
+    function checkLineIntersection2D(p1, p2, p3, p4, epsilon = 1e-8) {
+      const x1 = p1.x, y1 = p1.y;
+      const x2 = p2.x, y2 = p2.y;
+      const x3 = p3.x, y3 = p3.y;
+      const x4 = p4.x, y4 = p4.y;
+
+      const denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+      if (Math.abs(denominator) < epsilon) return null; // parallel/coincident
+
+      const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denominator;
+      const u = ((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denominator;
+
+      if (t < 0 || t > 1 || u < 0 || u > 1) return null; // outside segment bounds
+
+      return {
+        x: x1 + t * (x2 - x1),
+        y: y1 + t * (y2 - y1),
+        z: 0,
+        t,
+        u,
+      };
+    }
+
+    function computeSketchIntersections() {
+      const hits = [];
+      for (let i = 0; i < sketchLines.length; i++) {
+        for (let j = i + 1; j < sketchLines.length; j++) {
+          const a = sketchLines[i];
+          const b = sketchLines[j];
+          const hit = checkLineIntersection2D(a.start, a.end, b.start, b.end);
+          if (hit) {
+            hits.push({
+              x: hit.x,
+              y: hit.y,
+              z: 0,
+              lineA: a.id,
+              lineB: b.id,
+            });
+          }
+        }
+      }
+      return hits;
+    }
+
+    function snapToIntersectionForLine(start, cursorPoint, thresholdPx = 14) {
+      let best = null;
+      sketchLines.forEach(line => {
+        const hit = checkLineIntersection2D(start, cursorPoint, line.start, line.end);
+        if (!hit) return;
+        const d = Math.hypot(cursorPoint.x - hit.x, cursorPoint.y - hit.y);
+        if (d <= thresholdPx && (!best || d < best.distance)) {
+          best = { x: hit.x, y: hit.y, z: 0, distance: d, lineId: line.id };
+        }
+      });
+      return best;
+    }
+
     function snapValue(value) {
       const snap = document.getElementById('snapGrid');
       return snap && snap.checked ? Math.round(value / 5) * 5 : value;
@@ -2958,11 +3061,14 @@ def home() -> str:
         if (!sketchLineStart) {
           sketchLineStart = { x: point.x, y: point.y };
           sketchLinePreview = { start: { ...sketchLineStart }, end: { x: point.x, y: point.y } };
+          sketchSnapPoint = null;
           setAppStatus('LINE: pick second point.');
           drawFlags();
           return;
         }
-        const endPoint = { x: point.x, y: point.y };
+        const endPoint = sketchSnapPoint
+          ? { x: sketchSnapPoint.x, y: sketchSnapPoint.y }
+          : { x: point.x, y: point.y };
         sketchLines.push({
           id: `ln_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
           start: { ...sketchLineStart },
@@ -2970,6 +3076,7 @@ def home() -> str:
         });
         sketchLineStart = null;
         sketchLinePreview = null;
+        sketchSnapPoint = null;
         designHistoryCommit('sketch line added');
         setAppStatus('LINE committed.');
         drawFlags();
@@ -3033,7 +3140,15 @@ def home() -> str:
       if (isViewerMode()) return;
       if (sketchTool === 'line' && sketchLineStart) {
         const point = canvasPoint(event);
-        sketchLinePreview = { start: { ...sketchLineStart }, end: { x: point.x, y: point.y } };
+        const snap = snapToIntersectionForLine(sketchLineStart, point);
+        if (snap) {
+          sketchSnapPoint = { x: snap.x, y: snap.y, z: 0 };
+          sketchLinePreview = { start: { ...sketchLineStart }, end: { x: snap.x, y: snap.y } };
+          setAppStatus('LINE: snapped to intersection.');
+        } else {
+          sketchSnapPoint = null;
+          sketchLinePreview = { start: { ...sketchLineStart }, end: { x: point.x, y: point.y } };
+        }
         drawFlags();
         return;
       }
@@ -3283,7 +3398,7 @@ def home() -> str:
       const dimCount = flags.length * 3;
       const constraintReadout = document.getElementById('constraintReadout');
       const sideSelection = document.getElementById('sideSelection');
-      if (constraintReadout) constraintReadout.textContent = `H: ${hCount} | V: ${vCount} | DIM: ${dimCount}`;
+      if (constraintReadout) constraintReadout.textContent = `H: ${hCount} | V: ${vCount} | DIM: ${dimCount} | INT: ${sketchIntersections.length}`;
       if (sideSelection) {
         sideSelection.textContent = selectedFlagIndex === null
           ? `Tool: ${sketchTool}`
