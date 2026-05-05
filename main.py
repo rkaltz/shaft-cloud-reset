@@ -1202,10 +1202,14 @@ def home() -> str:
               <button id="cadDraftTriangleBtn" class="cad-tool">Triangle</button>
             </div>
             <div class="tool-row">
+              <button id="cadDraftUndoBtn" class="secondary">Undo</button>
+              <button id="cadDraftRedoBtn" class="secondary">Redo</button>
               <button id="cadDraftDeleteBtn" class="secondary">Delete Selected</button>
               <button id="cadDraftClearBtn" class="secondary">Clear Sketch</button>
             </div>
             <p id="cadDraftStatus">Tool: select</p>
+            <h3>Sketch Diagnostics</h3>
+            <table><tbody id="cadDraftDiagnostics"></tbody></table>
             <div class="tool-row">
               <button id="cadRefreshBtn" class="secondary" onclick="drawCad3d()">Refresh View</button>
               <button id="cadPresetDarkBtn" class="secondary" onclick="setCadPreset('dark', this)">Dark Preset</button>
@@ -1251,6 +1255,9 @@ def home() -> str:
     let cadDraftDrag = null;
     let cadDraftStart = null;
     let cadDraftPreview = null;
+    let cadDraftHistory = [[]];
+    let cadDraftFuture = [];
+    let cadDraftMoveStartSnapshot = null;
     let activeDrag = null;
     let selectedFlagIndex = null;
     let sketchTool = 'select';
@@ -3870,6 +3877,90 @@ method = "${document.getElementById('method').value}"`
       drawCad3d();
     }
 
+    function cloneCadDraftEntities() {
+      return JSON.parse(JSON.stringify(cadDraftEntities));
+    }
+
+    function cadDraftHistorySyncButtons() {
+      const undo = document.getElementById('cadDraftUndoBtn');
+      const redo = document.getElementById('cadDraftRedoBtn');
+      if (undo) undo.disabled = cadDraftHistory.length <= 1;
+      if (redo) redo.disabled = cadDraftFuture.length === 0;
+    }
+
+    function cadDraftCommitState(reason) {
+      const snapshot = cloneCadDraftEntities();
+      const last = cadDraftHistory[cadDraftHistory.length - 1];
+      if (JSON.stringify(snapshot) === JSON.stringify(last)) {
+        cadDraftHistorySyncButtons();
+        return;
+      }
+      cadDraftHistory.push(snapshot);
+      if (cadDraftHistory.length > 120) cadDraftHistory.shift();
+      cadDraftFuture = [];
+      cadDraftHistorySyncButtons();
+      if (reason) writeCadConsole(`Draft state saved: ${reason}`);
+    }
+
+    function undoCadDraft(button) {
+      if (cadDraftHistory.length <= 1) return;
+      const current = cadDraftHistory.pop();
+      cadDraftFuture.push(current);
+      cadDraftEntities = JSON.parse(JSON.stringify(cadDraftHistory[cadDraftHistory.length - 1]));
+      cadDraftSelectedIndex = null;
+      if (button) flashButton(button, 'Undo');
+      cadDraftHistorySyncButtons();
+      drawCad3d();
+    }
+
+    function redoCadDraft(button) {
+      if (!cadDraftFuture.length) return;
+      const next = cadDraftFuture.pop();
+      cadDraftEntities = JSON.parse(JSON.stringify(next));
+      cadDraftHistory.push(JSON.parse(JSON.stringify(next)));
+      cadDraftSelectedIndex = null;
+      if (button) flashButton(button, 'Redo');
+      cadDraftHistorySyncButtons();
+      drawCad3d();
+    }
+
+    function cadDraftDiagnostics() {
+      const diagnostics = [];
+      if (!cadDraftEntities.length) diagnostics.push({ level: 'info', text: 'No sketch entities yet.' });
+      const canvas = document.getElementById('cad3dCanvas');
+      const width = canvas?.width || 900;
+      const height = canvas?.height || 520;
+      cadDraftEntities.forEach((entity, idx) => {
+        if (entity.type === 'circle') {
+          if (entity.r < 5) diagnostics.push({ level: 'error', text: `E${idx + 1}: circle radius is too small.` });
+          if (entity.x - entity.r < 0 || entity.x + entity.r > width || entity.y - entity.r < 0 || entity.y + entity.r > height) {
+            diagnostics.push({ level: 'warn', text: `E${idx + 1}: circle is partly outside canvas.` });
+          }
+          return;
+        }
+        const w = Math.abs(entity.x2 - entity.x1);
+        const h = Math.abs(entity.y2 - entity.y1);
+        if (entity.type === 'line' && Math.hypot(w, h) < 8) diagnostics.push({ level: 'error', text: `E${idx + 1}: line too short.` });
+        if ((entity.type === 'rect' || entity.type === 'triangle') && (w < 8 || h < 8)) diagnostics.push({ level: 'error', text: `E${idx + 1}: ${entity.type} too small.` });
+        const minX = Math.min(entity.x1, entity.x2);
+        const maxX = Math.max(entity.x1, entity.x2);
+        const minY = Math.min(entity.y1, entity.y2);
+        const maxY = Math.max(entity.y1, entity.y2);
+        if (minX < 0 || maxX > width || minY < 0 || maxY > height) diagnostics.push({ level: 'warn', text: `E${idx + 1}: ${entity.type} is partly outside canvas.` });
+      });
+      return diagnostics;
+    }
+
+    function renderCadDraftDiagnostics() {
+      const tbody = document.getElementById('cadDraftDiagnostics');
+      if (!tbody) return;
+      const rows = cadDraftDiagnostics();
+      tbody.innerHTML = rows.map(row => {
+        const label = row.level === 'error' ? 'Error' : row.level === 'warn' ? 'Warning' : 'Info';
+        return `<tr><td>${label}</td><td>${row.text}</td></tr>`;
+      }).join('');
+    }
+
     function cadEntityHit(entity, p) {
       if (!entity) return false;
       if (entity.type === 'circle') {
@@ -3893,6 +3984,7 @@ method = "${document.getElementById('method').value}"`
           if (cadEntityHit(cadDraftEntities[i], p)) {
             cadDraftSelectedIndex = i;
             cadDraftDrag = { startX: p.x, startY: p.y };
+            cadDraftMoveStartSnapshot = cloneCadDraftEntities();
             break;
           }
         }
@@ -3931,6 +4023,12 @@ method = "${document.getElementById('method').value}"`
     function cad3dMouseUp() {
       if (cadDraftDrag) {
         cadDraftDrag = null;
+        if (cadDraftMoveStartSnapshot) {
+          const before = JSON.stringify(cadDraftMoveStartSnapshot);
+          const after = JSON.stringify(cadDraftEntities);
+          if (before !== after) cadDraftCommitState('move entity');
+          cadDraftMoveStartSnapshot = null;
+        }
         return;
       }
       if (!cadDraftPreview || !cadDraftStart) return;
@@ -3945,6 +4043,7 @@ method = "${document.getElementById('method').value}"`
       cadDraftSelectedIndex = cadDraftEntities.length - 1;
       cadDraftPreview = null;
       cadDraftStart = null;
+      cadDraftCommitState('create entity');
       drawCad3d();
     }
 
@@ -3953,15 +4052,18 @@ method = "${document.getElementById('method').value}"`
       cadDraftEntities.splice(cadDraftSelectedIndex, 1);
       cadDraftSelectedIndex = null;
       if (button) flashButton(button, 'Deleted');
+      cadDraftCommitState('delete entity');
       drawCad3d();
     }
 
     function clearCadDraft(button) {
+      if (!cadDraftEntities.length) return;
       cadDraftEntities = [];
       cadDraftSelectedIndex = null;
       cadDraftPreview = null;
       cadDraftStart = null;
       if (button) flashButton(button, 'Cleared');
+      cadDraftCommitState('clear sketch');
       drawCad3d();
     }
 
@@ -4014,6 +4116,8 @@ method = "${document.getElementById('method').value}"`
           ? `Tool: ${cadDraftTool} | Entities: ${cadDraftEntities.length}`
           : `Tool: ${cadDraftTool} | Selected: #${cadDraftSelectedIndex + 1}`;
       }
+      cadDraftHistorySyncButtons();
+      renderCadDraftDiagnostics();
     }
 
     function drawCad3d() {
@@ -4318,6 +4422,8 @@ method = "${document.getElementById('method').value}"`
         cadDraftRectBtn: button => setCadDraftTool('rect', button),
         cadDraftCircleBtn: button => setCadDraftTool('circle', button),
         cadDraftTriangleBtn: button => setCadDraftTool('triangle', button),
+        cadDraftUndoBtn: button => undoCadDraft(button),
+        cadDraftRedoBtn: button => redoCadDraft(button),
         cadDraftDeleteBtn: button => deleteCadDraftSelected(button),
         cadDraftClearBtn: button => clearCadDraft(button)
       };
@@ -4458,6 +4564,8 @@ method = "${document.getElementById('method').value}"`
     window.cad3dMouseDown = cad3dMouseDown;
     window.cad3dMouseMove = cad3dMouseMove;
     window.cad3dMouseUp = cad3dMouseUp;
+    window.undoCadDraft = undoCadDraft;
+    window.redoCadDraft = redoCadDraft;
     window.deleteCadDraftSelected = deleteCadDraftSelected;
     window.clearCadDraft = clearCadDraft;
     window.setCadPreset = setCadPreset;
