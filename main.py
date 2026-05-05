@@ -649,6 +649,10 @@ def home() -> str:
     .debug-panel { margin-top: 14px; border: 1px solid #cbd8d5; border-radius: 6px; background: #ffffff; padding: 10px; }
     .debug-panel h3 { margin: 0 0 8px; font-size: 14px; }
     .debug-panel table { font-size: 12px; margin-top: 0; }
+    .history-panel { margin-top: 14px; border: 1px solid #cbd8d5; border-radius: 6px; background: #ffffff; padding: 10px; }
+    .history-panel h3 { margin: 0 0 8px; font-size: 14px; }
+    .history-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+    .history-table td { font-size: 12px; padding: 5px; }
     .metrics { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }
     .card { background: #eef5f3; border-radius: 8px; padding: 12px; }
     .card span { display: block; font-size: 12px; color: #50615e; }
@@ -823,6 +827,14 @@ def home() -> str:
         <table><tbody id="debugHealth"></tbody></table>
         <label><input id="strictModeToggle" type="checkbox" onchange="setStrictMode(this.checked)"> Strict button mode</label>
         <button id="debugAuditBtn" class="secondary" onclick="runButtonAudit(this)">Run Button Audit</button>
+      </div>
+      <div class="history-panel">
+        <h3>Design History</h3>
+        <div class="history-actions">
+          <button id="historyUndoBtn" class="secondary">Undo Design</button>
+          <button id="historyRedoBtn" class="secondary">Redo Design</button>
+        </div>
+        <table class="history-table"><tbody id="historyRows"></tbody></table>
       </div>
       <p><a href="/docs">Developer API tester</a></p>
     </section>
@@ -1275,6 +1287,8 @@ def home() -> str:
     let cadDraftHistory = [[]];
     let cadDraftFuture = [];
     let cadDraftMoveStartSnapshot = null;
+    let designHistory = [];
+    let designFuture = [];
     let activeDrag = null;
     let selectedFlagIndex = null;
     let sketchTool = 'select';
@@ -1332,6 +1346,113 @@ def home() -> str:
         objects: ['Inner braid', 'UD tape strip', 'Bias tape strip', 'Outer braid', 'Layer index']
       }
     };
+
+    function deepClone(obj) {
+      return JSON.parse(JSON.stringify(obj));
+    }
+
+    function designInputSnapshot() {
+      const read = id => document.getElementById(id)?.value ?? null;
+      return {
+        target: read('target'),
+        head: read('head'),
+        speed: read('speed'),
+        angle: read('angle'),
+        material: read('material'),
+        method: read('method'),
+        architectureMode: read('architectureMode')
+      };
+    }
+
+    function applyDesignInputSnapshot(inputs) {
+      if (!inputs) return;
+      Object.entries(inputs).forEach(([id, value]) => {
+        const el = document.getElementById(id);
+        if (el && value !== null && value !== undefined) el.value = value;
+      });
+    }
+
+    function designSnapshot(reason) {
+      return {
+        ts: new Date().toISOString(),
+        reason: reason || 'edit',
+        inputs: designInputSnapshot(),
+        flags: deepClone(flags),
+        tapes: deepClone(tapes),
+        drawingStations: deepClone(drawingStations),
+        flagConstraints: deepClone(flagConstraints),
+        cadDraftEntities: deepClone(cadDraftEntities)
+      };
+    }
+
+    function renderDesignHistory() {
+      const tbody = document.getElementById('historyRows');
+      if (!tbody) return;
+      const latestRows = designHistory.slice(-8).reverse();
+      tbody.innerHTML = latestRows.map((item, i) => {
+        const t = new Date(item.ts);
+        const label = Number.isNaN(t.valueOf()) ? item.ts : t.toLocaleTimeString();
+        return `<tr><td>${i === 0 ? '<strong>Current</strong>' : 'Step'}</td><td>${item.reason}</td><td>${label}</td></tr>`;
+      }).join('');
+      const undo = document.getElementById('historyUndoBtn');
+      const redo = document.getElementById('historyRedoBtn');
+      if (undo) undo.disabled = designHistory.length <= 1;
+      if (redo) redo.disabled = designFuture.length === 0;
+    }
+
+    function applyDesignSnapshot(snapshot) {
+      if (!snapshot) return;
+      applyDesignInputSnapshot(snapshot.inputs);
+      flags = deepClone(snapshot.flags || []);
+      tapes = deepClone(snapshot.tapes || []);
+      drawingStations = deepClone(snapshot.drawingStations || []);
+      flagConstraints = deepClone(snapshot.flagConstraints || defaultFlagConstraints(flags.length));
+      cadDraftEntities = deepClone(snapshot.cadDraftEntities || []);
+      selectedDrawingStationIndex = null;
+      selectedFlagIndex = null;
+      cadDraftSelectedIndex = null;
+      ensureDrawingStations();
+      ensureConstraintCoverage();
+      renderFlagEditor();
+      renderTapeCad();
+      refreshTapeEngineering();
+      stackLayers = generatedStackLayers();
+      renderStackCad();
+      drawDesign(latest);
+      drawCad3d();
+      updateValidationReadout();
+      renderDesignHistory();
+      setAppStatus(`Design restored: ${snapshot.reason}`);
+    }
+
+    function designHistoryCommit(reason) {
+      const snap = designSnapshot(reason);
+      const prev = designHistory[designHistory.length - 1];
+      if (prev && JSON.stringify({ ...snap, ts: '' }) === JSON.stringify({ ...prev, ts: '' })) {
+        renderDesignHistory();
+        return;
+      }
+      designHistory.push(snap);
+      if (designHistory.length > 120) designHistory.shift();
+      designFuture = [];
+      renderDesignHistory();
+    }
+
+    function undoDesignHistory(button) {
+      if (designHistory.length <= 1) return;
+      const current = designHistory.pop();
+      designFuture.push(current);
+      applyDesignSnapshot(deepClone(designHistory[designHistory.length - 1]));
+      if (button) flashButton(button, 'Undo');
+    }
+
+    function redoDesignHistory(button) {
+      if (!designFuture.length) return;
+      const snap = designFuture.pop();
+      designHistory.push(deepClone(snap));
+      applyDesignSnapshot(deepClone(snap));
+      if (button) flashButton(button, 'Redo');
+    }
 
     async function loadBuildFingerprint() {
       try {
@@ -2043,6 +2164,7 @@ def home() -> str:
         {name: 'Fit tip tune', length: 300, root: 58, tip: latestFitProfile.launch_bias.includes('lower') ? 42 : 30, angle: 0, station: 'Tip', layer: 'tip', locked: false}
       ];
       renderFlagEditor();
+      designHistoryCommit('fit->cad apply');
       run();
       renderFitBridge('fit->cad apply');
       writeCadConsole('Applied Fit-to-Build target to CAD model.');
@@ -2152,6 +2274,7 @@ def home() -> str:
       if (!drawingStations[index]) return;
       drawingStations[index][key] = numberOr(value, drawingStations[index][key]);
       ensureDrawingStations();
+      designHistoryCommit(`drawing station ${index + 1} ${key}`);
       drawDesign(latest);
     }
 
@@ -2164,6 +2287,7 @@ def home() -> str:
       drawingStations.splice(drawingStations.length - 1, 0, { z: newZ, od: newOd });
       selectedDrawingStationIndex = drawingStations.length - 2;
       if (button) flashButton(button, 'Added');
+      designHistoryCommit('drawing station added');
       drawDesign(latest);
     }
 
@@ -2174,6 +2298,7 @@ def home() -> str:
       drawingStations.splice(selectedDrawingStationIndex, 1);
       selectedDrawingStationIndex = Math.min(selectedDrawingStationIndex, drawingStations.length - 1);
       if (button) flashButton(button, 'Deleted');
+      designHistoryCommit('drawing station deleted');
       drawDesign(latest);
     }
 
@@ -2181,6 +2306,7 @@ def home() -> str:
       drawingStations = defaultDrawingStations();
       selectedDrawingStationIndex = null;
       if (button) flashButton(button, 'Reset');
+      designHistoryCommit('drawing profile reset');
       drawDesign(latest);
     }
 
@@ -2527,6 +2653,7 @@ def home() -> str:
         flags[index][key] = value;
       }
       flags[index] = normalizeFlag(flags[index]);
+      designHistoryCommit(`flag ${index + 1} updated`);
       drawFlags();
     }
 
@@ -2534,6 +2661,7 @@ def home() -> str:
       flashButton(button, 'Added');
       flags.push({name: 'New flag', length: 320, root: 70, tip: 48, angle: 0, station: 'Custom', layer: 'custom', locked: false});
       ensureConstraintCoverage();
+      designHistoryCommit('flag added');
       renderFlagEditor();
     }
 
@@ -2541,6 +2669,7 @@ def home() -> str:
       flashButton(button, 'Added');
       flags.push({name: 'Triangle bias flag', length: 340, root: 76, tip: 4, angle: 45, station: 'Custom', layer: 'bias', locked: false});
       ensureConstraintCoverage();
+      designHistoryCommit('triangle flag added');
       renderFlagEditor();
     }
 
@@ -2548,6 +2677,7 @@ def home() -> str:
       flashButton(button, 'Deleted');
       flags.splice(index, 1);
       flagConstraints = defaultFlagConstraints(flags.length);
+      designHistoryCommit('flag deleted');
       renderFlagEditor();
     }
 
@@ -2555,6 +2685,7 @@ def home() -> str:
       flashButton(button, 'Reset');
       flags = defaultFlags();
       flagConstraints = defaultFlagConstraints(flags.length);
+      designHistoryCommit('flags reset');
       renderFlagEditor();
     }
 
@@ -3147,6 +3278,7 @@ ${y2.toFixed(3)}
       renderStackCad();
       drawCad3d();
       updateValidationReadout();
+      designHistoryCommit(`tape ${index + 1} updated`);
     }
 
     function addTape(button) {
@@ -3158,6 +3290,7 @@ ${y2.toFixed(3)}
       renderStackCad();
       drawCad3d();
       updateValidationReadout();
+      designHistoryCommit('tape strip added');
     }
 
     function addBiasTapePair(button) {
@@ -3170,6 +3303,7 @@ ${y2.toFixed(3)}
       renderStackCad();
       drawCad3d();
       updateValidationReadout();
+      designHistoryCommit('bias tape pair added');
     }
 
     function deleteTape(index, button) {
@@ -3181,6 +3315,7 @@ ${y2.toFixed(3)}
       renderStackCad();
       drawCad3d();
       updateValidationReadout();
+      designHistoryCommit('tape strip deleted');
     }
 
     function resetTapes(button) {
@@ -3192,6 +3327,7 @@ ${y2.toFixed(3)}
       renderStackCad();
       drawCad3d();
       updateValidationReadout();
+      designHistoryCommit('tape cad reset');
     }
 
     function tapeColor(angle) {
@@ -3955,6 +4091,7 @@ method = "${document.getElementById('method').value}"`
       if (cadDraftHistory.length > 120) cadDraftHistory.shift();
       cadDraftFuture = [];
       cadDraftHistorySyncButtons();
+      designHistoryCommit(`cad draft: ${reason || 'edit'}`);
       if (reason) writeCadConsole(`Draft state saved: ${reason}`);
     }
 
@@ -4414,6 +4551,8 @@ method = "${document.getElementById('method').value}"`
         stackTab: () => showView('stack'),
         cad3dTab: () => showView('cad3d'),
         analyzeBtn: button => run(button),
+        historyUndoBtn: button => undoDesignHistory(button),
+        historyRedoBtn: button => redoDesignHistory(button),
         debugAuditBtn: button => runButtonAudit(button),
         exportJsonBtn: button => downloadJson(button),
         exportGcodeBtn: button => downloadGcode(button),
@@ -4631,6 +4770,8 @@ method = "${document.getElementById('method').value}"`
     window.downloadCadScript = downloadCadScript;
     window.downloadJson = downloadJson;
     window.downloadGcode = downloadGcode;
+    window.undoDesignHistory = undoDesignHistory;
+    window.redoDesignHistory = redoDesignHistory;
     window.setStrictMode = setStrictMode;
     window.runButtonAudit = runButtonAudit;
     window.bootstrapButtons = bootstrapButtons;
@@ -4639,9 +4780,16 @@ method = "${document.getElementById('method').value}"`
       setAppStatus('AE boot starting: wiring controls and running first analysis...');
       loadBuildFingerprint();
       renderDebugHealth();
+      renderDesignHistory();
       applyViewerMode();
       bootstrapButtons();
+      ['target', 'head', 'speed', 'angle', 'material', 'method', 'architectureMode'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => designHistoryCommit(`input changed: ${id}`));
+      });
       run().then(() => {
+        if (designHistory.length === 0) designHistoryCommit('initial state');
         if (!isViewerMode()) {
           setAppStatus('AE boot OK: controls are live. If a button fails now, the status bar will show the exact error.');
         }
