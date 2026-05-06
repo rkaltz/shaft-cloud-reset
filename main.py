@@ -1277,6 +1277,9 @@ def home() -> str:
             <h3>Draft Settings</h3>
             <label>Snap Draft to Grid <input id="cadDraftSnap" type="checkbox" checked onchange="drawCad3d()"></label>
             <label>Draft Grid Step (px) <input id="cadDraftSnapStep" type="number" min="1" step="1" value="10" onchange="drawCad3d()"></label>
+            <label>Snap Endpoints <input id="cadSnapEndpoint" type="checkbox" checked onchange="drawCad3d()"></label>
+            <label>Snap Midpoints <input id="cadSnapMidpoint" type="checkbox" checked onchange="drawCad3d()"></label>
+            <label>Snap Intersections <input id="cadSnapIntersection" type="checkbox" checked onchange="drawCad3d()"></label>
             <label>Dark Mode <input id="cadDarkMode" type="checkbox" onchange="drawCad3d()"></label>
             <label>Show Axis <input id="cadShowAxis" type="checkbox" checked onchange="drawCad3d()"></label>
             <label>Show Grid <input id="cadShowGrid" type="checkbox" checked onchange="drawCad3d()"></label>
@@ -1340,6 +1343,9 @@ def home() -> str:
     let cadDraftMoveStartSnapshot = null;
     let cadDraftCursor = null;
     let cadDraftSnapCursor = null;
+    let cadDraftSnapKind = 'none';
+    // Safety cache so diagnostics/draw paths never crash on missing local scope.
+    let sketchIntersections = [];
     let designHistory = [];
     let designFuture = [];
     let materialLibrary = {};
@@ -3390,7 +3396,7 @@ def home() -> str:
     function drawFlags() {
       const canvas = document.getElementById('flagCanvas');
       const ctx = canvas.getContext('2d');
-      const sketchIntersections = computeSketchIntersections();
+      sketchIntersections = computeSketchIntersections();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#101918';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -4702,6 +4708,88 @@ method = "${document.getElementById('method').value}"`
       return Boolean(input && input.checked);
     }
 
+    function cadDraftObjectSnapEnabled() {
+      const ep = document.getElementById('cadSnapEndpoint')?.checked;
+      const mp = document.getElementById('cadSnapMidpoint')?.checked;
+      const ip = document.getElementById('cadSnapIntersection')?.checked;
+      return Boolean(ep || mp || ip);
+    }
+
+    function cadLineIntersection(a, b, c, d) {
+      const x1 = a.x, y1 = a.y;
+      const x2 = b.x, y2 = b.y;
+      const x3 = c.x, y3 = c.y;
+      const x4 = d.x, y4 = d.y;
+      const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+      if (Math.abs(denom) < 1e-8) return null;
+      const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+      const u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / denom;
+      if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+      return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+    }
+
+    function cadDraftSnapCandidates() {
+      const candidates = [];
+      const snapEndpoint = Boolean(document.getElementById('cadSnapEndpoint')?.checked);
+      const snapMidpoint = Boolean(document.getElementById('cadSnapMidpoint')?.checked);
+      const snapIntersection = Boolean(document.getElementById('cadSnapIntersection')?.checked);
+
+      cadDraftEntities.forEach(entity => {
+        if (entity.type === 'line' || entity.type === 'rect' || entity.type === 'triangle') {
+          const p1 = { x: entity.x1, y: entity.y1 };
+          const p2 = { x: entity.x2, y: entity.y2 };
+          if (snapEndpoint) {
+            candidates.push({ x: p1.x, y: p1.y, kind: 'endpoint' }, { x: p2.x, y: p2.y, kind: 'endpoint' });
+          }
+          if (snapMidpoint) {
+            candidates.push({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2, kind: 'midpoint' });
+          }
+        } else if (entity.type === 'circle') {
+          if (snapEndpoint || snapMidpoint) {
+            candidates.push({ x: entity.x, y: entity.y, kind: 'center' });
+          }
+        }
+      });
+
+      if (snapIntersection) {
+        const lines = cadDraftEntities.filter(e => e.type === 'line');
+        for (let i = 0; i < lines.length; i++) {
+          for (let j = i + 1; j < lines.length; j++) {
+            const a = { x: lines[i].x1, y: lines[i].y1 };
+            const b = { x: lines[i].x2, y: lines[i].y2 };
+            const c = { x: lines[j].x1, y: lines[j].y1 };
+            const d = { x: lines[j].x2, y: lines[j].y2 };
+            const hit = cadLineIntersection(a, b, c, d);
+            if (hit) candidates.push({ x: hit.x, y: hit.y, kind: 'intersection' });
+          }
+        }
+      }
+
+      return candidates;
+    }
+
+    function cadDraftResolveSnapPoint(rawPoint) {
+      let point = cadDraftSnapPoint(rawPoint);
+      let kind = cadDraftSnapEnabled() ? 'grid' : 'none';
+
+      if (!cadDraftObjectSnapEnabled()) return { point, kind };
+      const candidates = cadDraftSnapCandidates();
+      if (!candidates.length) return { point, kind };
+
+      const threshold = 14;
+      let best = null;
+      let bestDistance = Infinity;
+      candidates.forEach(candidate => {
+        const d = Math.hypot(candidate.x - rawPoint.x, candidate.y - rawPoint.y);
+        if (d < bestDistance && d <= threshold) {
+          bestDistance = d;
+          best = candidate;
+        }
+      });
+      if (best) return { point: { x: best.x, y: best.y }, kind: best.kind };
+      return { point, kind };
+    }
+
     function cadDraftSnapPoint(p) {
       if (!cadDraftSnapEnabled()) return { x: p.x, y: p.y };
       const step = cadDraftSnapStep();
@@ -4897,9 +4985,11 @@ method = "${document.getElementById('method').value}"`
       if (isViewerMode()) return;
       cadDraftTool = normalizeCadDraftTool(cadDraftTool);
       const raw = cadCanvasPoint(event);
-      const p = cadDraftTool === 'select' ? raw : cadDraftSnapPoint(raw);
+      const snap = cadDraftResolveSnapPoint(raw);
+      const p = cadDraftTool === 'select' ? raw : snap.point;
       cadDraftCursor = raw;
-      cadDraftSnapCursor = cadDraftSnapPoint(raw);
+      cadDraftSnapCursor = snap.point;
+      cadDraftSnapKind = cadDraftTool === 'select' ? 'none' : snap.kind;
       if (cadDraftTool === 'select') {
         cadDraftSelectedIndex = null;
         for (let i = cadDraftEntities.length - 1; i >= 0; i--) {
@@ -4922,9 +5012,11 @@ method = "${document.getElementById('method').value}"`
       if (isViewerMode()) return;
       cadDraftTool = normalizeCadDraftTool(cadDraftTool);
       const raw = cadCanvasPoint(event);
-      const p = cadDraftSnapPoint(raw);
+      const snap = cadDraftResolveSnapPoint(raw);
+      const p = snap.point;
       cadDraftCursor = raw;
       cadDraftSnapCursor = p;
+      cadDraftSnapKind = snap.kind;
       if (cadDraftDrag && cadDraftSelectedIndex !== null && cadDraftEntities[cadDraftSelectedIndex]) {
         const entity = cadDraftEntities[cadDraftSelectedIndex];
         const dx = p.x - cadDraftDrag.startX;
@@ -4974,6 +5066,7 @@ method = "${document.getElementById('method').value}"`
       cadDraftPreview = null;
       cadDraftStart = null;
       cadDraftSnapCursor = null;
+      cadDraftSnapKind = 'none';
       cadDraftCommitState('create entity');
       drawCad3d();
     }
@@ -4995,6 +5088,7 @@ method = "${document.getElementById('method').value}"`
       cadDraftStart = null;
       cadDraftCursor = null;
       cadDraftSnapCursor = null;
+      cadDraftSnapKind = 'none';
       if (button) flashButton(button, 'Cleared');
       cadDraftCommitState('clear sketch');
       drawCad3d();
@@ -5043,9 +5137,13 @@ method = "${document.getElementById('method').value}"`
           : cadDraftPreview;
         drawCadDraftEntity(ctx, preview, false);
       }
-      if (cadDraftSnapEnabled() && cadDraftSnapCursor) {
+      if ((cadDraftSnapEnabled() || cadDraftObjectSnapEnabled()) && cadDraftSnapCursor) {
         ctx.save();
-        ctx.strokeStyle = '#56f2b0';
+        const color = cadDraftSnapKind === 'intersection' ? '#ffd84d'
+          : cadDraftSnapKind === 'midpoint' ? '#8fd3ff'
+          : cadDraftSnapKind === 'endpoint' ? '#56f2b0'
+          : '#56f2b0';
+        ctx.strokeStyle = color;
         ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.arc(cadDraftSnapCursor.x, cadDraftSnapCursor.y, 5.5, 0, Math.PI * 2);
@@ -5062,10 +5160,11 @@ method = "${document.getElementById('method').value}"`
       if (status) {
         const step = cadDraftSnapStep();
         const snapState = cadDraftSnapEnabled() ? `snap ${step}px` : 'snap off';
+        const snapMode = cadDraftSnapKind && cadDraftSnapKind !== 'none' ? ` (${cadDraftSnapKind})` : '';
         const cursorState = cadDraftCursor ? ` | XY ${Math.round(cadDraftCursor.x)},${Math.round(cadDraftCursor.y)}` : '';
         status.textContent = cadDraftSelectedIndex === null
-          ? `Tool: ${cadDraftTool} | ${snapState} | Entities: ${cadDraftEntities.length}${cursorState}`
-          : `Tool: ${cadDraftTool} | ${snapState} | Selected: #${cadDraftSelectedIndex + 1}${cursorState}`;
+          ? `Tool: ${cadDraftTool} | ${snapState}${snapMode} | Entities: ${cadDraftEntities.length}${cursorState}`
+          : `Tool: ${cadDraftTool} | ${snapState}${snapMode} | Selected: #${cadDraftSelectedIndex + 1}${cursorState}`;
       }
       cadDraftHistorySyncButtons();
       renderCadDraftDiagnostics();
