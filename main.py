@@ -704,6 +704,17 @@ def home() -> str:
     .cad-toolbar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; margin: 10px 0; }
     .cad-tool { background: #243532; color: #d7fff6; border: 1px solid #45615b; padding: 8px; margin: 0; }
     .cad-tool.active { background: #6d2d76; color: white; }
+    .cad-workspace { display: grid; grid-template-columns: 1fr 320px; gap: 12px; margin-top: 10px; }
+    .cad-drawing-surface { background: #050808; border: 1px solid #344642; border-radius: 6px; padding: 8px; }
+    .cad-drawing-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 2px 10px; }
+    .cad-drawing-head h3 { margin: 0; font-size: 17px; }
+    .cad-drawing-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    .cad-drawing-controls .cad-tool { width: auto; padding: 7px 10px; }
+    .cad-drawing-canvas { width: 100%; height: 78vh; min-height: 680px; max-height: 84vh; background: #101918; border: 1px solid #2d3f3c; border-radius: 4px; display: block; }
+    .cad-right-panel { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; max-height: 84vh; overflow: auto; }
+    .cad-right-panel h3 { margin: 8px 0; }
+    .cad-mini-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .cad-script-hidden { display: none; }
     .sketch-shell { display: grid; grid-template-columns: 72px 1fr 300px; gap: 0; border: 1px solid #344642; background: #050808; }
     .sketch-menu { grid-column: 1 / 4; background: #202020; color: white; padding: 7px 10px; font-family: Georgia, serif; font-weight: 700; display: flex; gap: 8px; flex-wrap: wrap; }
     .sketch-menu .menu-btn { width: auto; margin: 0; padding: 4px 8px; background: transparent; border: 1px solid transparent; color: #ffffff; border-radius: 4px; font-weight: 700; }
@@ -747,6 +758,11 @@ def home() -> str:
     .viewer-mode button.viewer-locked {
       opacity: 0.65;
       cursor: not-allowed;
+    }
+    @media (max-width: 1100px) {
+      .cad-workspace { grid-template-columns: 1fr; }
+      .cad-drawing-canvas { min-height: 520px; height: 64vh; }
+      .cad-right-panel { max-height: none; }
     }
     @media (max-width: 900px) { main, .grid2 { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } }
   </style>
@@ -885,11 +901,11 @@ def home() -> str:
         <div class="tabs">
           <button class="tab active" id="simTab" onclick="showView('simulation')">Simulation</button>
           <button class="tab" id="fitTab" onclick="showView('fit')">Fit-to-Build</button>
-          <button class="tab" id="drawTab" onclick="showView('drawing')">Design / Drawing</button>
+          <button class="tab" id="drawTab" onclick="showView('cad3d')">CAD Workspace</button>
           <button class="tab" id="flagTab" onclick="showView('flags')">Flag CAD</button>
           <button class="tab" id="tapeTab" onclick="showView('tape')">TapeCAD</button>
           <button class="tab" id="stackTab" onclick="showView('stack')">StackCAD</button>
-          <button class="tab" id="cad3dTab" onclick="showView('cad3d')">3D CAD</button>
+          <button class="tab" id="cad3dTab" onclick="showView('cad3d')" style="display:none">3D CAD</button>
         </div>
       </div>
       <div id="simulationView" class="view">
@@ -1231,31 +1247,43 @@ def home() -> str:
         <div id="stackRows"></div>
       </div>
       <div id="cad3dView" class="view hidden">
-        <div class="cad-strip">
-          <div class="cad-chip">Model<strong>Composite Shaft</strong></div>
-          <div class="cad-chip">Kernel<strong>CadQuery bridge</strong></div>
-          <div class="cad-chip">Architecture<strong id="cadArchitectureChip">Flag wrap</strong></div>
-          <div class="cad-chip">Export<strong>STEP recipe</strong></div>
-        </div>
-        <h3>Parametric 3D Shaft / Mandrel Workbench</h3>
-        <div class="architecture-panel">
-          <div class="architecture-card">
-            <h3>Architecture Mode</h3>
-            <table><tbody id="architectureReadout"></tbody></table>
-          </div>
-          <div class="architecture-card">
-            <h3>Shaft-Native CAD Objects</h3>
-            <div class="object-list" id="architectureObjects"></div>
-          </div>
-        </div>
-        <div class="cad-split">
-          <div class="code-panel">
-            <textarea id="cadScript" spellcheck="false"></textarea>
-          </div>
-          <div class="viewport-panel">
-            <canvas class="viewer-canvas" id="cad3dCanvas" width="900" height="520"
+        <div class="cad-workspace">
+          <div class="cad-drawing-surface">
+            <div class="cad-drawing-head">
+              <h3>AE ShaftCAD Drafting</h3>
+              <div class="cad-drawing-controls">
+                <button id="cadDraftSelectBtn" class="cad-tool active">Select</button>
+                <button id="cadDraftLineBtn" class="cad-tool">Line</button>
+                <button id="cadDraftRectBtn" class="cad-tool">Rect</button>
+                <button id="cadDraftCircleBtn" class="cad-tool">Circle</button>
+                <button id="cadDraftTriangleBtn" class="cad-tool">Triangle</button>
+                <button id="cadDraftUndoBtn" class="secondary">Undo</button>
+                <button id="cadDraftRedoBtn" class="secondary">Redo</button>
+                <button id="cadDraftDeleteBtn" class="secondary">Delete</button>
+                <button id="cadDraftClearBtn" class="secondary">Clear</button>
+              </div>
+            </div>
+            <canvas class="cad-drawing-canvas" id="cad3dCanvas" width="1400" height="900"
               onmousedown="cad3dMouseDown(event)" onmousemove="cad3dMouseMove(event)"
               onmouseup="cad3dMouseUp()" onmouseleave="cad3dMouseUp()"></canvas>
+            <div class="console-panel" id="cadConsole">CAD console ready.</div>
+          </div>
+
+          <div class="cad-right-panel">
+            <h3>Draft Settings</h3>
+            <label>Snap Draft to Grid <input id="cadDraftSnap" type="checkbox" checked onchange="drawCad3d()"></label>
+            <label>Draft Grid Step (px) <input id="cadDraftSnapStep" type="number" min="1" step="1" value="10" onchange="drawCad3d()"></label>
+            <label>Dark Mode <input id="cadDarkMode" type="checkbox" onchange="drawCad3d()"></label>
+            <label>Show Axis <input id="cadShowAxis" type="checkbox" checked onchange="drawCad3d()"></label>
+            <label>Show Grid <input id="cadShowGrid" type="checkbox" checked onchange="drawCad3d()"></label>
+            <label>Smooth Render <input id="cadSmooth" type="checkbox" onchange="drawCad3d()"></label>
+            <label>Zoom To Fit <input id="cadZoomFit" type="checkbox" onchange="drawCad3d()"></label>
+            <p id="cadDraftStatus">Tool: select</p>
+
+            <h3>Diagnostics</h3>
+            <table><tbody id="cadDraftDiagnostics"></tbody></table>
+
+            <h3>Export</h3>
             <div class="export-row">
               <select id="cadExportType">
                 <option>JSCAD script</option>
@@ -1265,55 +1293,23 @@ def home() -> str:
               </select>
               <button id="cadExportBtn" onclick="downloadCadScript(this)">Export</button>
             </div>
-          </div>
-          <div class="inspector-panel">
-            <h3>Options</h3>
-            <label>Dark Mode <input id="cadDarkMode" type="checkbox" onchange="drawCad3d()"></label>
-            <label>Show Axis <input id="cadShowAxis" type="checkbox" checked onchange="drawCad3d()"></label>
-            <label>Show Grid <input id="cadShowGrid" type="checkbox" checked onchange="drawCad3d()"></label>
-            <label>Smooth Render <input id="cadSmooth" type="checkbox" onchange="drawCad3d()"></label>
-            <label>Zoom To Fit <input id="cadZoomFit" type="checkbox" onchange="drawCad3d()"></label>
-            <h3>Draft Sketch</h3>
-            <div class="cad-toolbar">
-              <button id="cadDraftSelectBtn" class="cad-tool active">Select</button>
-              <button id="cadDraftLineBtn" class="cad-tool">Line</button>
-              <button id="cadDraftRectBtn" class="cad-tool">Rect</button>
-              <button id="cadDraftCircleBtn" class="cad-tool">Circle</button>
-              <button id="cadDraftTriangleBtn" class="cad-tool">Triangle</button>
-            </div>
-            <div class="tool-row">
-              <button id="cadDraftUndoBtn" class="secondary">Undo</button>
-              <button id="cadDraftRedoBtn" class="secondary">Redo</button>
-              <button id="cadDraftDeleteBtn" class="secondary">Delete Selected</button>
-              <button id="cadDraftClearBtn" class="secondary">Clear Sketch</button>
-            </div>
-            <p id="cadDraftStatus">Tool: select</p>
-            <h3>Sketch Diagnostics</h3>
-            <table><tbody id="cadDraftDiagnostics"></tbody></table>
-            <div class="tool-row">
+            <div class="cad-mini-actions">
               <button id="cadRefreshBtn" class="secondary" onclick="drawCad3d()">Refresh View</button>
-              <button id="cadPresetDarkBtn" class="secondary" onclick="setCadPreset('dark', this)">Dark Preset</button>
-              <button id="cadPresetLightBtn" class="secondary" onclick="setCadPreset('light', this)">Light Preset</button>
-              <button id="cadPresetInspectBtn" class="secondary" onclick="setCadPreset('inspect', this)">Inspect Preset</button>
-              <button id="cadSyncScriptBtn" class="secondary" onclick="syncCadScript(this)">Sync Script</button>
+              <button id="cadPresetInspectBtn" class="secondary" onclick="setCadPreset('inspect', this)">Inspect</button>
             </div>
-            <h3>Documentation</h3>
-            <div class="link-list">
-              <button onclick="loadCadExample('shaft')">Shaft Envelope</button>
-              <button onclick="loadCadExample('mandrel')">Mandrel Core</button>
-              <button onclick="loadCadExample('flags')">Flag Wrap Layout</button>
-              <button onclick="loadCadExample('imports')">Import SVG / STL plan</button>
+            <div class="cad-mini-actions">
+              <button id="cadPresetDarkBtn" class="secondary" onclick="setCadPreset('dark', this)">Dark</button>
+              <button id="cadPresetLightBtn" class="secondary" onclick="setCadPreset('light', this)">Light</button>
             </div>
-            <h3>Examples</h3>
-            <div class="link-list">
-              <button onclick="loadCadExample('extrusion')">Extrusions</button>
-              <button onclick="loadCadExample('hollow')">Hollow Operations</button>
-              <button onclick="loadCadExample('parametric')">Parameter Types</button>
-            </div>
+
             <h3>Object Inspector</h3>
             <table><tbody id="cadInspector"></tbody></table>
           </div>
-          <div class="console-panel" id="cadConsole">CAD console ready.</div>
+        </div>
+        <div class="cad-script-hidden">
+          <textarea id="cadScript" spellcheck="false"></textarea>
+          <table><tbody id="architectureReadout"></tbody></table>
+          <div id="architectureObjects"></div>
         </div>
       </div>
     </section>
@@ -2182,6 +2178,7 @@ def home() -> str:
     }
 
     function showView(viewName) {
+      if (viewName === 'drawing') viewName = 'cad3d';
       const simulation = document.getElementById('simulationView');
       const fitView = document.getElementById('fitView');
       const drawing = document.getElementById('drawingView');
@@ -2205,12 +2202,11 @@ def home() -> str:
       cad3dView.classList.toggle('hidden', viewName !== 'cad3d');
       simTab.classList.toggle('active', viewName === 'simulation');
       fitTab.classList.toggle('active', viewName === 'fit');
-      drawTab.classList.toggle('active', viewName === 'drawing');
+      drawTab.classList.toggle('active', viewName === 'cad3d');
       flagTab.classList.toggle('active', viewName === 'flags');
       tapeTab.classList.toggle('active', viewName === 'tape');
       stackTab.classList.toggle('active', viewName === 'stack');
-      cad3dTab.classList.toggle('active', viewName === 'cad3d');
-      if (viewName === 'drawing') drawDesign(latest);
+      cad3dTab.classList.toggle('active', false);
       if (viewName === 'fit') renderFitBridge();
       if (viewName === 'flags') renderFlagEditor();
       if (viewName === 'tape') renderTapeCad();
@@ -4681,7 +4677,42 @@ method = "${document.getElementById('method').value}"`
       const canvas = document.getElementById('cad3dCanvas');
       if (!canvas) return { x: 0, y: 0 };
       const rect = canvas.getBoundingClientRect();
-      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const sx = canvas.width / Math.max(1, rect.width);
+      const sy = canvas.height / Math.max(1, rect.height);
+      return {
+        x: (event.clientX - rect.left) * sx,
+        y: (event.clientY - rect.top) * sy
+      };
+    }
+
+    function cadDraftSnapStep() {
+      const input = document.getElementById('cadDraftSnapStep');
+      const value = Number(input?.value || 10);
+      return Number.isFinite(value) && value > 0 ? value : 10;
+    }
+
+    function cadDraftSnapEnabled() {
+      const input = document.getElementById('cadDraftSnap');
+      return Boolean(input && input.checked);
+    }
+
+    function cadDraftSnapPoint(p) {
+      if (!cadDraftSnapEnabled()) return { x: p.x, y: p.y };
+      const step = cadDraftSnapStep();
+      return {
+        x: Math.round(p.x / step) * step,
+        y: Math.round(p.y / step) * step
+      };
+    }
+
+    function cadDraftApplyOrtho(start, p, shiftKey) {
+      if (!shiftKey) return { x: p.x, y: p.y };
+      const dx = p.x - start.x;
+      const dy = p.y - start.y;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        return { x: p.x, y: start.y };
+      }
+      return { x: start.x, y: p.y };
     }
 
     function setCadDraftTool(tool, button) {
@@ -4787,6 +4818,22 @@ method = "${document.getElementById('method').value}"`
         const dy = p.y - entity.y;
         return Math.hypot(dx, dy) <= Math.max(8, entity.r + 6);
       }
+      if (entity.type === 'line') {
+        const x1 = entity.x1;
+        const y1 = entity.y1;
+        const x2 = entity.x2;
+        const y2 = entity.y2;
+        const vx = x2 - x1;
+        const vy = y2 - y1;
+        const wx = p.x - x1;
+        const wy = p.y - y1;
+        const c1 = vx * wx + vy * wy;
+        const c2 = vx * vx + vy * vy;
+        const t = c2 > 0 ? Math.max(0, Math.min(1, c1 / c2)) : 0;
+        const px = x1 + t * vx;
+        const py = y1 + t * vy;
+        return Math.hypot(p.x - px, p.y - py) <= 7;
+      }
       const x1 = Math.min(entity.x1, entity.x2);
       const x2 = Math.max(entity.x1, entity.x2);
       const y1 = Math.min(entity.y1, entity.y2);
@@ -4796,7 +4843,7 @@ method = "${document.getElementById('method').value}"`
 
     function cad3dMouseDown(event) {
       if (isViewerMode()) return;
-      const p = cadCanvasPoint(event);
+      const p = cadDraftSnapPoint(cadCanvasPoint(event));
       if (cadDraftTool === 'select') {
         cadDraftSelectedIndex = null;
         for (let i = cadDraftEntities.length - 1; i >= 0; i--) {
@@ -4817,7 +4864,8 @@ method = "${document.getElementById('method').value}"`
 
     function cad3dMouseMove(event) {
       if (isViewerMode()) return;
-      const p = cadCanvasPoint(event);
+      const raw = cadCanvasPoint(event);
+      const p = cadDraftSnapPoint(raw);
       if (cadDraftDrag && cadDraftSelectedIndex !== null && cadDraftEntities[cadDraftSelectedIndex]) {
         const entity = cadDraftEntities[cadDraftSelectedIndex];
         const dx = p.x - cadDraftDrag.startX;
@@ -4834,8 +4882,11 @@ method = "${document.getElementById('method').value}"`
         return;
       }
       if (!cadDraftPreview) return;
-      cadDraftPreview.x2 = p.x;
-      cadDraftPreview.y2 = p.y;
+      const endpoint = cadDraftPreview.type === 'line'
+        ? cadDraftApplyOrtho(cadDraftStart || { x: cadDraftPreview.x1, y: cadDraftPreview.y1 }, p, Boolean(event.shiftKey))
+        : p;
+      cadDraftPreview.x2 = endpoint.x;
+      cadDraftPreview.y2 = endpoint.y;
       drawCad3d();
     }
 
@@ -4931,9 +4982,11 @@ method = "${document.getElementById('method').value}"`
       }
       const status = document.getElementById('cadDraftStatus');
       if (status) {
+        const step = cadDraftSnapStep();
+        const snapState = cadDraftSnapEnabled() ? `snap ${step}px` : 'snap off';
         status.textContent = cadDraftSelectedIndex === null
-          ? `Tool: ${cadDraftTool} | Entities: ${cadDraftEntities.length}`
-          : `Tool: ${cadDraftTool} | Selected: #${cadDraftSelectedIndex + 1}`;
+          ? `Tool: ${cadDraftTool} | ${snapState} | Entities: ${cadDraftEntities.length}`
+          : `Tool: ${cadDraftTool} | ${snapState} | Selected: #${cadDraftSelectedIndex + 1}`;
       }
       cadDraftHistorySyncButtons();
       renderCadDraftDiagnostics();
