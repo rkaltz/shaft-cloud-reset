@@ -709,7 +709,9 @@ def home() -> str:
     .cad-drawing-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 2px 10px; }
     .cad-drawing-head h3 { margin: 0; font-size: 17px; }
     .cad-drawing-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    .cad-drawing-controls .group-label { color: #9bb4ae; font-size: 11px; font-weight: 700; padding: 0 4px; align-self: center; }
     .cad-drawing-controls .cad-tool { width: auto; padding: 7px 10px; }
+    .cad-drawing-controls .secondary { width: auto; padding: 7px 10px; margin-top: 0; }
     .cad-drawing-canvas { width: 100%; height: 78vh; min-height: 680px; max-height: 84vh; background: #101918; border: 1px solid #2d3f3c; border-radius: 4px; display: block; }
     .cad-right-panel { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 6px; padding: 12px; max-height: 84vh; overflow: auto; }
     .cad-right-panel h3 { margin: 8px 0; }
@@ -1252,11 +1254,13 @@ def home() -> str:
             <div class="cad-drawing-head">
               <h3>AE ShaftCAD Drafting</h3>
               <div class="cad-drawing-controls">
+                <span class="group-label">DRAW</span>
                 <button id="cadDraftSelectBtn" class="cad-tool active">Select</button>
                 <button id="cadDraftLineBtn" class="cad-tool">Line</button>
                 <button id="cadDraftRectBtn" class="cad-tool">Rect</button>
                 <button id="cadDraftCircleBtn" class="cad-tool">Circle</button>
                 <button id="cadDraftTriangleBtn" class="cad-tool">Triangle</button>
+                <span class="group-label">EDIT</span>
                 <button id="cadDraftUndoBtn" class="secondary">Undo</button>
                 <button id="cadDraftRedoBtn" class="secondary">Redo</button>
                 <button id="cadDraftDeleteBtn" class="secondary">Delete</button>
@@ -1334,6 +1338,8 @@ def home() -> str:
     let cadDraftHistory = [[]];
     let cadDraftFuture = [];
     let cadDraftMoveStartSnapshot = null;
+    let cadDraftCursor = null;
+    let cadDraftSnapCursor = null;
     let designHistory = [];
     let designFuture = [];
     let materialLibrary = {};
@@ -4715,15 +4721,61 @@ method = "${document.getElementById('method').value}"`
       return { x: start.x, y: p.y };
     }
 
+    function normalizeCadDraftTool(tool) {
+      const allowed = new Set(['select', 'line', 'rect', 'circle', 'triangle']);
+      if (allowed.has(tool)) return tool;
+      return 'line';
+    }
+
     function setCadDraftTool(tool, button) {
       if (isViewerMode()) return;
-      cadDraftTool = tool;
+      cadDraftTool = normalizeCadDraftTool(tool);
       document.querySelectorAll('#cad3dView #cadDraftSelectBtn, #cad3dView #cadDraftLineBtn, #cad3dView #cadDraftRectBtn, #cad3dView #cadDraftCircleBtn, #cad3dView #cadDraftTriangleBtn')
         .forEach(item => item.classList.remove('active'));
       if (button) button.classList.add('active');
+      if (!button) {
+        const fallbackBtn = document.getElementById(
+          cadDraftTool === 'select' ? 'cadDraftSelectBtn' :
+          cadDraftTool === 'line' ? 'cadDraftLineBtn' :
+          cadDraftTool === 'rect' ? 'cadDraftRectBtn' :
+          cadDraftTool === 'circle' ? 'cadDraftCircleBtn' : 'cadDraftTriangleBtn'
+        );
+        if (fallbackBtn) fallbackBtn.classList.add('active');
+      }
       const status = document.getElementById('cadDraftStatus');
-      if (status) status.textContent = `Tool: ${tool}`;
+      if (status) status.textContent = `Tool: ${cadDraftTool}`;
       drawCad3d();
+    }
+
+    function hardBindCadLineTool() {
+      const lineBtn = document.getElementById('cadDraftLineBtn');
+      if (!lineBtn) return false;
+      lineBtn.onclick = null;
+      lineBtn.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        safeInvoke('cadDraftLineBtn', () => setCadDraftTool('line', lineBtn));
+      }, true);
+      return true;
+    }
+
+    function bindCadLineHotkeys() {
+      document.removeEventListener('keydown', cadLineHotkeyHandler, true);
+      document.addEventListener('keydown', cadLineHotkeyHandler, true);
+    }
+
+    function cadLineHotkeyHandler(event) {
+      const key = String(event.key || '').toLowerCase();
+      if (key !== 'l') return;
+      const active = document.activeElement;
+      const tag = String(active?.tagName || '').toLowerCase();
+      const isTyping = tag === 'input' || tag === 'textarea' || active?.isContentEditable;
+      if (isTyping) return;
+      const cadVisible = !document.getElementById('cad3dView')?.classList.contains('hidden');
+      if (!cadVisible) return;
+      event.preventDefault();
+      setCadDraftTool('line');
+      setAppStatus('Line tool locked in (hotkey L).');
     }
 
     function cloneCadDraftEntities() {
@@ -4843,7 +4895,11 @@ method = "${document.getElementById('method').value}"`
 
     function cad3dMouseDown(event) {
       if (isViewerMode()) return;
-      const p = cadDraftSnapPoint(cadCanvasPoint(event));
+      cadDraftTool = normalizeCadDraftTool(cadDraftTool);
+      const raw = cadCanvasPoint(event);
+      const p = cadDraftTool === 'select' ? raw : cadDraftSnapPoint(raw);
+      cadDraftCursor = raw;
+      cadDraftSnapCursor = cadDraftSnapPoint(raw);
       if (cadDraftTool === 'select') {
         cadDraftSelectedIndex = null;
         for (let i = cadDraftEntities.length - 1; i >= 0; i--) {
@@ -4864,8 +4920,11 @@ method = "${document.getElementById('method').value}"`
 
     function cad3dMouseMove(event) {
       if (isViewerMode()) return;
+      cadDraftTool = normalizeCadDraftTool(cadDraftTool);
       const raw = cadCanvasPoint(event);
       const p = cadDraftSnapPoint(raw);
+      cadDraftCursor = raw;
+      cadDraftSnapCursor = p;
       if (cadDraftDrag && cadDraftSelectedIndex !== null && cadDraftEntities[cadDraftSelectedIndex]) {
         const entity = cadDraftEntities[cadDraftSelectedIndex];
         const dx = p.x - cadDraftDrag.startX;
@@ -4891,6 +4950,7 @@ method = "${document.getElementById('method').value}"`
     }
 
     function cad3dMouseUp() {
+      cadDraftTool = normalizeCadDraftTool(cadDraftTool);
       if (cadDraftDrag) {
         cadDraftDrag = null;
         if (cadDraftMoveStartSnapshot) {
@@ -4913,6 +4973,7 @@ method = "${document.getElementById('method').value}"`
       cadDraftSelectedIndex = cadDraftEntities.length - 1;
       cadDraftPreview = null;
       cadDraftStart = null;
+      cadDraftSnapCursor = null;
       cadDraftCommitState('create entity');
       drawCad3d();
     }
@@ -4932,6 +4993,8 @@ method = "${document.getElementById('method').value}"`
       cadDraftSelectedIndex = null;
       cadDraftPreview = null;
       cadDraftStart = null;
+      cadDraftCursor = null;
+      cadDraftSnapCursor = null;
       if (button) flashButton(button, 'Cleared');
       cadDraftCommitState('clear sketch');
       drawCad3d();
@@ -4980,13 +5043,29 @@ method = "${document.getElementById('method').value}"`
           : cadDraftPreview;
         drawCadDraftEntity(ctx, preview, false);
       }
+      if (cadDraftSnapEnabled() && cadDraftSnapCursor) {
+        ctx.save();
+        ctx.strokeStyle = '#56f2b0';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(cadDraftSnapCursor.x, cadDraftSnapCursor.y, 5.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cadDraftSnapCursor.x - 8, cadDraftSnapCursor.y);
+        ctx.lineTo(cadDraftSnapCursor.x + 8, cadDraftSnapCursor.y);
+        ctx.moveTo(cadDraftSnapCursor.x, cadDraftSnapCursor.y - 8);
+        ctx.lineTo(cadDraftSnapCursor.x, cadDraftSnapCursor.y + 8);
+        ctx.stroke();
+        ctx.restore();
+      }
       const status = document.getElementById('cadDraftStatus');
       if (status) {
         const step = cadDraftSnapStep();
         const snapState = cadDraftSnapEnabled() ? `snap ${step}px` : 'snap off';
+        const cursorState = cadDraftCursor ? ` | XY ${Math.round(cadDraftCursor.x)},${Math.round(cadDraftCursor.y)}` : '';
         status.textContent = cadDraftSelectedIndex === null
-          ? `Tool: ${cadDraftTool} | ${snapState} | Entities: ${cadDraftEntities.length}`
-          : `Tool: ${cadDraftTool} | ${snapState} | Selected: #${cadDraftSelectedIndex + 1}`;
+          ? `Tool: ${cadDraftTool} | ${snapState} | Entities: ${cadDraftEntities.length}${cursorState}`
+          : `Tool: ${cadDraftTool} | ${snapState} | Selected: #${cadDraftSelectedIndex + 1}${cursorState}`;
       }
       cadDraftHistorySyncButtons();
       renderCadDraftDiagnostics();
@@ -5008,18 +5087,25 @@ method = "${document.getElementById('method').value}"`
 
       const originX = canvas.width / 2;
       const originY = canvas.height / 2 + 70;
-      const gridSpan = zoomFit ? 13 : 18;
-      ctx.strokeStyle = dark ? '#263b37' : '#cfd3ff';
-      ctx.lineWidth = 1;
       if (showGrid) {
-        for (let i = -gridSpan; i <= gridSpan; i++) {
+        const gridStep = Math.max(4, cadDraftSnapStep());
+        const majorEvery = 5;
+        for (let x = 0, i = 0; x <= canvas.width; x += gridStep, i++) {
+          const major = i % majorEvery === 0;
+          ctx.strokeStyle = major ? (dark ? '#2a4f49' : '#bcc5de') : (dark ? '#1a2f2b' : '#dde3f3');
+          ctx.lineWidth = major ? 1 : 0.7;
           ctx.beginPath();
-          ctx.moveTo(originX + i * 22 - 330, originY + i * 11 + 165);
-          ctx.lineTo(originX + i * 22 + 330, originY + i * 11 - 165);
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvas.height);
           ctx.stroke();
+        }
+        for (let y = 0, i = 0; y <= canvas.height; y += gridStep, i++) {
+          const major = i % majorEvery === 0;
+          ctx.strokeStyle = major ? (dark ? '#2a4f49' : '#bcc5de') : (dark ? '#1a2f2b' : '#dde3f3');
+          ctx.lineWidth = major ? 1 : 0.7;
           ctx.beginPath();
-          ctx.moveTo(originX + i * 22 - 330, originY - i * 11 - 165);
-          ctx.lineTo(originX + i * 22 + 330, originY - i * 11 + 165);
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
           ctx.stroke();
         }
       }
@@ -5371,14 +5457,16 @@ method = "${document.getElementById('method').value}"`
     function bootstrapButtons() {
       const routes = buttonRoutes();
       Object.keys(routes).forEach(id => bindClickById(id, button => routes[id](button)));
+      const lineLocked = hardBindCadLineTool();
+      bindCadLineHotkeys();
       if (typeof document.removeEventListener === 'function') {
         document.removeEventListener('click', emergencyClickRouter, true);
       }
       if (typeof document.addEventListener === 'function') {
         document.addEventListener('click', emergencyClickRouter, true);
       }
-      setAppStatus('AE boot OK: JavaScript loaded, buttons bound, emergency click router active.');
-      writeCadConsole('Button safety bootstrap active: id bindings loaded. Emergency click router active.');
+      setAppStatus(`AE boot OK: JavaScript loaded, buttons bound, emergency click router active.${lineLocked ? ' Line tool hard-locked.' : ''}`);
+      writeCadConsole(`Button safety bootstrap active: id bindings loaded. Emergency click router active.${lineLocked ? ' CAD line tool hard-bind active.' : ' CAD line button missing.'}`);
       const strictToggle = document.getElementById('strictModeToggle');
       if (strictToggle) strictToggle.checked = debugState.strictMode;
       runButtonAudit();
