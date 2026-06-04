@@ -321,6 +321,195 @@ def simulate_launch(cpm: float, head_speed_mph: float) -> dict[str, float]:
     }
 
 
+def clamp_value(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def avg(values: list[float]) -> float:
+    return sum(values) / max(len(values), 1)
+
+
+def behavior_label_from_butt_cpm(cpm: float) -> str:
+    if cpm < 245:
+        return "smooth / active overall behavior"
+    if cpm < 265:
+        return "balanced overall behavior"
+    if cpm < 285:
+        return "stable / firm overall behavior"
+    return "very stable / tour-stout overall behavior"
+
+
+def zone_cpm_values(overall: float, zones: list[dict[str, float]]) -> list[float]:
+    return [auditor_cpm_reading(overall)] + [auditor_cpm_reading(float(row["cpm"])) for row in zones]
+
+
+def analyze_behavior_fingerprint(cpm_values: list[float], torque_deg: float) -> dict[str, Any]:
+    butt = cpm_values[0]
+    handle = avg(cpm_values[0:3])
+    mid = avg(cpm_values[3:6])
+    tip = avg(cpm_values[6:8])
+    gradient = tip - butt
+    kickpoint_percent = clamp_value(52.9 - gradient * 0.015, 45.0, 52.9)
+    kickpoint_label = "low kickpoint" if kickpoint_percent < 48.0 else "high kickpoint" if kickpoint_percent > 51.0 else "mid kickpoint"
+    return {
+        "measurement_order": ["Butt", "41", "36", "31", "26", "21", "16", "11"],
+        "overall_behavior_cpm": butt,
+        "handle_behavior_cpm": handle,
+        "mid_behavior_cpm": mid,
+        "tip_behavior_cpm": tip,
+        "profile_gradient": gradient,
+        "kickpoint_percent": kickpoint_percent,
+        "kickpoint_label": kickpoint_label,
+        "overall_behavior": behavior_label_from_butt_cpm(butt),
+        "handle_behavior": "high handle stability" if handle >= 300 else "controlled handle stability" if handle >= 270 else "smooth handle response",
+        "mid_behavior": "low droop / strong load control" if mid >= 425 else "balanced load timing" if mid >= 380 else "active mid loading",
+        "tip_behavior": "low launch / low spin tip control" if tip >= 540 else "mid launch / controlled spin tip" if tip >= 470 else "higher launch / active tip response",
+        "torque_behavior": "high torsional control" if torque_deg <= 2.8 else "balanced torsional response" if torque_deg <= 3.5 else "active torsional feel",
+        "selection_rule": "Do not select by retail flex labels. Use measured CPM shape, torque, dynamic bend, and launch behavior.",
+    }
+
+
+def swing_load_factor(speed_mph: float, transition: str = "Medium", tempo: str = "Medium", release: str = "Mid") -> float:
+    transition_factor = {"Smooth": 0.9, "Medium": 1.0, "Hard": 1.25, "Aggressive": 1.25}.get(transition, 1.0)
+    tempo_factor = {"Smooth": 0.94, "Medium": 1.0, "Aggressive": 1.12, "Fast": 1.12}.get(tempo, 1.0)
+    release_factor = {"Early": 0.85, "Mid": 1.0, "Late": 1.25}.get(release, 1.0)
+    return (speed_mph / 100.0) * transition_factor * tempo_factor * release_factor
+
+
+def dynamic_bend_model(cpm_values: list[float], speed_mph: float, transition: str = "Medium", tempo: str = "Medium", release: str = "Mid") -> dict[str, Any]:
+    load = swing_load_factor(speed_mph, transition, tempo, release) * 100.0
+    handle = avg(cpm_values[0:3])
+    mid = avg(cpm_values[3:6])
+    tip = avg(cpm_values[6:8])
+    bend_profile = [
+        (load / max(cpm_values[0], 1.0)) * 0.35,
+        (load / max(handle, 1.0)) * 0.55,
+        (load / max(handle, 1.0)) * 0.75,
+        load / max(mid, 1.0),
+        (load / max(mid, 1.0)) * 1.15,
+        (load / max(mid, 1.0)) * 1.25,
+        (load / max(tip, 1.0)) * 1.35,
+        (load / max(tip, 1.0)) * 1.5,
+    ]
+    max_index = bend_profile.index(max(bend_profile))
+    station = ["Butt", "41", "36", "31", "26", "21", "16", "11"][max_index]
+    return {
+        "bend_profile": [round(value, 3) for value in bend_profile],
+        "max_deflection_index": max_index,
+        "max_bend_station": station,
+        "max_deflection_proxy": round(max(bend_profile), 3),
+        "load_style": "mid-load bend" if (load / max(mid, 1.0)) > (load / max(handle, 1.0)) * 1.25 else "handle-stable bend",
+        "release_behavior": "active release" if (load / max(tip, 1.0)) > 0.22 else "controlled release",
+    }
+
+
+def impact_deflection_model(cpm_values: list[float], speed_mph: float, transition: str = "Medium", tempo: str = "Medium", release: str = "Mid") -> dict[str, Any]:
+    shaft_load = swing_load_factor(speed_mph, transition, tempo, release)
+    butt = cpm_values[0]
+    mid = avg(cpm_values[3:6])
+    tip = avg(cpm_values[6:8])
+    forward = shaft_load * (520.0 / max(tip, 1.0)) * 0.95
+    droop = shaft_load * (400.0 / max(mid, 1.0)) * 0.55
+    twist = shaft_load * (275.0 / max(butt, 1.0)) * 0.35
+    return {
+        "forward_deflection_in": round(forward, 2),
+        "droop_deflection_in": round(droop, 2),
+        "twist_deflection_deg": round(twist, 2),
+        "impact_behavior": "high kick / active tip at impact" if forward > 1.2 else "stable tip / low dynamic loft" if forward < 0.65 else "higher toe droop / timing sensitive" if droop > 0.75 else "controlled impact delivery",
+    }
+
+
+def ball_flight_prediction(speed_mph: float, impact: dict[str, Any]) -> dict[str, Any]:
+    ball_speed = speed_mph * 1.47
+    dynamic_loft = 10.5 + impact["forward_deflection_in"] * 4.2
+    launch_angle = dynamic_loft * 0.82 + speed_mph * 0.015
+    spin_rate = 1800.0 + dynamic_loft * 145.0 + impact["droop_deflection_in"] * 350.0 - speed_mph * 3.0
+    carry = ball_speed * 2.35 + launch_angle * 3.8 - spin_rate * 0.006
+    return {
+        "ball_speed_mph": round(ball_speed, 1),
+        "dynamic_loft_deg": round(dynamic_loft, 1),
+        "launch_angle_deg": round(launch_angle, 1),
+        "spin_rate_rpm": round(spin_rate),
+        "carry_yards": round(carry),
+        "flight_window": "low penetrating" if launch_angle < 10 and spin_rate < 2200 else "high spinny" if launch_angle > 15 and spin_rate > 3000 else "optimized driver window" if 11 <= launch_angle <= 14.5 and 2200 <= spin_rate <= 2800 else "playable neutral",
+    }
+
+
+def speed_gain_prediction(cpm_values: list[float], speed_mph: float, transition: str = "Medium", release: str = "Mid") -> dict[str, Any]:
+    mid = avg(cpm_values[3:6])
+    tip = avg(cpm_values[6:8])
+    ideal_mid = 430.0 if transition in {"Hard", "Aggressive"} else 370.0 if transition == "Smooth" else 400.0
+    ideal_tip = 540.0 if release == "Late" else 460.0 if release == "Early" else 500.0
+    mid_match = clamp_value(1.0 - abs(mid - ideal_mid) / ideal_mid, 0.0, 1.0)
+    tip_match = clamp_value(1.0 - abs(tip - ideal_tip) / ideal_tip, 0.0, 1.0)
+    efficiency = clamp_value(mid_match * 0.45 + tip_match * 0.55, 0.0, 1.0)
+    max_gain = 3.2 if transition in {"Hard", "Aggressive"} else 2.0
+    gain = max_gain * efficiency
+    return {
+        "base_speed_mph": speed_mph,
+        "gain_mph": round(gain, 2),
+        "final_speed_mph": round(speed_mph + gain, 2),
+        "carry_gain_yards": round(gain * 2.7),
+        "timing_efficiency_pct": round(efficiency * 100),
+    }
+
+
+def locked_butt_optimizer(cpm_values: list[float], speed_mph: float, transition: str = "Medium", release: str = "Mid") -> dict[str, Any]:
+    best = None
+    for mid_delta in range(-60, 81, 10):
+        for tip_delta in range(-80, 101, 10):
+            candidate = cpm_values.copy()
+            candidate[0] = cpm_values[0]
+            for index in [3, 4, 5]:
+                candidate[index] = auditor_cpm_reading(candidate[index] + mid_delta)
+            for index in [6, 7]:
+                candidate[index] = auditor_cpm_reading(candidate[index] + tip_delta)
+            speed_gain = speed_gain_prediction(candidate, speed_mph, transition, release)
+            smoothness_penalty = sum(abs(candidate[i] - candidate[i - 1]) for i in range(1, len(candidate))) / 1000.0
+            score = speed_gain["gain_mph"] - smoothness_penalty
+            if best is None or score > best["score"]:
+                best = {
+                    "score": round(score, 3),
+                    "mid_delta_cpm": mid_delta,
+                    "tip_delta_cpm": tip_delta,
+                    "profile": [round(value, 1) for value in candidate],
+                    "speed_gain": speed_gain,
+                }
+    return {
+        "locked_butt_cpm": round(cpm_values[0], 1),
+        "best": best,
+        "rule": "Butt CPM remains locked; only mid, tip, and torque behavior should move around it.",
+    }
+
+
+def behavior_intelligence(
+    overall: float,
+    zones: list[dict[str, float]],
+    torque_deg: float,
+    speed_mph: float,
+    transition: str = "Medium",
+    tempo: str = "Medium",
+    release: str = "Mid",
+) -> dict[str, Any]:
+    cpm_values = zone_cpm_values(overall, zones)
+    fingerprint = analyze_behavior_fingerprint(cpm_values, torque_deg)
+    dynamic = dynamic_bend_model(cpm_values, speed_mph, transition, tempo, release)
+    impact = impact_deflection_model(cpm_values, speed_mph, transition, tempo, release)
+    flight = ball_flight_prediction(speed_mph, impact)
+    speed_gain = speed_gain_prediction(cpm_values, speed_mph, transition, release)
+    optimizer = locked_butt_optimizer(cpm_values, speed_mph, transition, release)
+    return {
+        "engine": "AE behavior intelligence",
+        "cpm_values": [round(value, 1) for value in cpm_values],
+        "fingerprint": fingerprint,
+        "dynamic_bend": dynamic,
+        "impact_deflection": impact,
+        "ball_flight_prediction": flight,
+        "speed_gain_prediction": speed_gain,
+        "locked_butt_optimizer": optimizer,
+    }
+
+
 def fit_build_brief(
     target_cpm: float,
     torque_target: float,
@@ -680,6 +869,7 @@ def analyze_shaft(
     torsion = torsion_deg(segments, material, factor=method["torsion_factor"])
     zones = zone_profile(segments, material, calibration)
     fatigue = fatigue_cycles()
+    behavior = behavior_intelligence(cpm, zones, torsion, head_speed_mph)
     return {
         "inputs": {
             "target_cpm": target_cpm,
@@ -732,6 +922,7 @@ def analyze_shaft(
             "resonance_margin_hz": natural_frequency_hz(segments, material) - 15.2,
         },
         "launch_simulation": simulate_launch(cpm, head_speed_mph),
+        "behavior_intelligence": behavior,
         "gcode": generate_mandrel_gcode(
             segments,
             units=gcode_units,
@@ -1108,6 +1299,31 @@ def home() -> str:
             <strong id="guidanceTitle">Run baseline</strong>
           </div>
           <p id="guidanceText">The default model will run on startup. Adjust CPM, head weight, material, or wrap angle, then analyze again.</p>
+        </div>
+        <div class="fit-builder-brief">
+          <h3>Behavior Intelligence</h3>
+          <div class="brief-grid">
+            <div class="brief-card">
+              <span>Fingerprint</span>
+              <strong id="behaviorOverall">Waiting</strong>
+              <p id="behaviorShape">Run analysis to read measured shaft behavior.</p>
+            </div>
+            <div class="brief-card">
+              <span>Dynamic Bend</span>
+              <strong id="behaviorBend">Waiting</strong>
+              <p id="behaviorDynamic">Max bend and load style will appear here.</p>
+            </div>
+            <div class="brief-card">
+              <span>Impact / Flight</span>
+              <strong id="behaviorFlight">Waiting</strong>
+              <p id="behaviorImpact">Impact deflection and flight window will appear here.</p>
+            </div>
+            <div class="brief-card">
+              <span>Locked-Butt Optimizer</span>
+              <strong id="behaviorOptimizer">Waiting</strong>
+              <p id="behaviorOptimizeText">Butt CPM stays fixed while mid and tip are tuned.</p>
+            </div>
+          </div>
         </div>
         <div class="grid2">
           <div>
@@ -2573,6 +2789,7 @@ def home() -> str:
       document.getElementById('mass').textContent = latest.mass_g.toFixed(1) + ' g';
       document.getElementById('torsion').textContent = latest.torsion_deflection_deg_15nm.toFixed(1) + ' deg';
       updateGuidanceCard(latest);
+      renderBehaviorIntelligence(latest.behavior_intelligence);
 
       document.getElementById('zones').innerHTML = latest.zone_profile.map(
         z => `<tr><td>${z.station_in}"</td><td>${zoneCpmDisplay(z)}</td></tr>`
@@ -2597,7 +2814,9 @@ def home() -> str:
         ['Best Wrap Angle', latest.wrapping_angle_optimization.best.angle_deg + ' deg'],
         ['TapeCAD Mass Added', latest.tape_engineering.estimated_mass_g.toFixed(2) + ' g'],
         ['TapeCAD CPM Boost', '+' + latest.tape_engineering.estimated_cpm_boost.toFixed(1)],
-        ['TapeCAD Torque Reduction', '-' + latest.tape_engineering.estimated_torque_reduction_deg.toFixed(2) + ' deg']
+        ['TapeCAD Torque Reduction', '-' + latest.tape_engineering.estimated_torque_reduction_deg.toFixed(2) + ' deg'],
+        ['Behavior Gradient', (latest.behavior_intelligence?.fingerprint?.profile_gradient ?? 0).toFixed(1) + ' CPM'],
+        ['Kickpoint', `${(latest.behavior_intelligence?.fingerprint?.kickpoint_percent ?? 0).toFixed(1)}% ${latest.behavior_intelligence?.fingerprint?.kickpoint_label || ''}`]
       ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
 
       document.getElementById('library').textContent = JSON.stringify({
@@ -2648,6 +2867,43 @@ def home() -> str:
       } else {
         title.textContent = 'Model is too soft';
         text.textContent = `The shaft is ${absError.toFixed(1)} CPM under target. Try a higher wrap angle, stiffer material, or added tip/mid reinforcement.`;
+      }
+    }
+
+    function renderBehaviorIntelligence(behavior) {
+      if (!behavior) return;
+      const fingerprint = behavior.fingerprint || {};
+      const dynamic = behavior.dynamic_bend || {};
+      const impact = behavior.impact_deflection || {};
+      const flight = behavior.ball_flight_prediction || {};
+      const speedGain = behavior.speed_gain_prediction || {};
+      const optimizer = behavior.locked_butt_optimizer || {};
+      const best = optimizer.best || {};
+
+      const overall = document.getElementById('behaviorOverall');
+      const shape = document.getElementById('behaviorShape');
+      const bend = document.getElementById('behaviorBend');
+      const dynamicText = document.getElementById('behaviorDynamic');
+      const flightTitle = document.getElementById('behaviorFlight');
+      const impactText = document.getElementById('behaviorImpact');
+      const optTitle = document.getElementById('behaviorOptimizer');
+      const optText = document.getElementById('behaviorOptimizeText');
+
+      if (overall) overall.textContent = `${Number(fingerprint.overall_behavior_cpm || 0).toFixed(1)} CPM`;
+      if (shape) {
+        shape.textContent = `${fingerprint.overall_behavior || 'measured behavior'}; ${fingerprint.tip_behavior || 'tip behavior pending'}; ${Number(fingerprint.kickpoint_percent || 0).toFixed(1)}% ${fingerprint.kickpoint_label || 'kickpoint'}.`;
+      }
+      if (bend) bend.textContent = dynamic.max_bend_station || 'n/a';
+      if (dynamicText) {
+        dynamicText.textContent = `${dynamic.load_style || 'load style pending'} with ${dynamic.release_behavior || 'release pending'}; max bend proxy ${Number(dynamic.max_deflection_proxy || 0).toFixed(3)}.`;
+      }
+      if (flightTitle) flightTitle.textContent = flight.flight_window || 'n/a';
+      if (impactText) {
+        impactText.textContent = `${impact.impact_behavior || 'impact pending'}; forward ${Number(impact.forward_deflection_in || 0).toFixed(2)}", droop ${Number(impact.droop_deflection_in || 0).toFixed(2)}", twist ${Number(impact.twist_deflection_deg || 0).toFixed(2)} deg. Predicted carry ${Number(flight.carry_yards || 0).toFixed(0)} yd.`;
+      }
+      if (optTitle) optTitle.textContent = best.speed_gain ? `+${Number(best.speed_gain.gain_mph || 0).toFixed(2)} mph` : 'Locked';
+      if (optText) {
+        optText.textContent = `${optimizer.rule || 'Keep butt CPM fixed.'} Best move: mid ${Number(best.mid_delta_cpm || 0).toFixed(0)} CPM, tip ${Number(best.tip_delta_cpm || 0).toFixed(0)} CPM; timing efficiency ${Number(speedGain.timing_efficiency_pct || 0).toFixed(0)}%.`;
       }
     }
 
