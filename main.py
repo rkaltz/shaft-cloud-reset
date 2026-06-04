@@ -25,6 +25,9 @@ class Material:
     nu12: float
     density_kg_m3: float
     cost_per_kg: float
+    family: str = "Carbon fiber"
+    design_role: str = "General shaft laminate"
+    data_quality: str = "Engineering estimate"
 
 
 @dataclass
@@ -43,9 +46,19 @@ class Segment:
 
 
 MATERIALS: dict[str, Material] = {
-    "Mitsubishi MR70": Material("Mitsubishi MR70", 161e9, 8.7e9, 4.5e9, 0.32, 1600.0, 95.0),
-    "Toray T1100G": Material("Toray T1100G", 215e9, 8.5e9, 4.2e9, 0.33, 1580.0, 125.0),
-    "Hexcel IM7": Material("Hexcel IM7", 276e9, 14.0e9, 5.2e9, 0.31, 1620.0, 140.0),
+    "Mitsubishi MR70": Material("Mitsubishi MR70", 161e9, 8.7e9, 4.5e9, 0.32, 1600.0, 95.0, "Carbon fiber", "Smooth load, balanced strength/stiffness shaft body"),
+    "Toray T1100G": Material("Toray T1100G", 215e9, 8.5e9, 4.2e9, 0.33, 1580.0, 125.0, "Carbon fiber", "High strength, stable premium driver shaft body"),
+    "Hexcel IM7": Material("Hexcel IM7", 276e9, 14.0e9, 5.2e9, 0.31, 1620.0, 140.0, "Carbon fiber", "Firm mid/butt reinforcement and stout feel tuning"),
+    "Toray T700S": Material("Toray T700S", 230e9, 15.0e9, 5.0e9, 0.30, 1600.0, 55.0, "Carbon fiber", "Lower-cost standard/intermediate modulus baseline"),
+    "Toray T800H": Material("Toray T800H", 294e9, 13.0e9, 5.0e9, 0.31, 1590.0, 85.0, "Carbon fiber", "Lightweight premium mid/high modulus shaft body"),
+    "Toray M40J": Material("Toray M40J", 377e9, 9.0e9, 4.4e9, 0.32, 1600.0, 185.0, "High modulus carbon", "Butt/mid stiffness without large mass increase"),
+    "Toray M46J": Material("Toray M46J", 436e9, 8.0e9, 4.0e9, 0.32, 1600.0, 240.0, "Ultra high modulus carbon", "Very stiff local reinforcement; use carefully in tip"),
+    "Mitsubishi Dialead K13C": Material("Mitsubishi Dialead K13C", 640e9, 7.0e9, 3.7e9, 0.32, 1700.0, 420.0, "Pitch-based high modulus carbon", "Specialty ultra-stiff strips, low-strain zone tuning"),
+    "S-Glass Damping Layer": Material("S-Glass Damping Layer", 86e9, 86e9, 35.0e9, 0.22, 2000.0, 22.0, "Glass fiber", "Damping, toughness, hoop support, smoother feel"),
+    "E-Glass Hoop Layer": Material("E-Glass Hoop Layer", 73e9, 73e9, 30.0e9, 0.22, 1950.0, 14.0, "Glass fiber", "Budget hoop stability and impact tolerance"),
+    "Kevlar 49 Aramid": Material("Kevlar 49 Aramid", 130e9, 5.5e9, 2.8e9, 0.34, 1440.0, 65.0, "Aramid fiber", "Vibration damping and impact-tough bias/veil layer"),
+    "Basalt Fiber": Material("Basalt Fiber", 89e9, 89e9, 32.0e9, 0.24, 2000.0, 18.0, "Basalt fiber", "Durable damping layer between glass and carbon behavior"),
+    "Boron Fiber Prepreg": Material("Boron Fiber Prepreg", 400e9, 30.0e9, 14.0e9, 0.23, 2550.0, 520.0, "Boron fiber", "Heavy, expensive, very stable local reinforcement"),
 }
 
 MANUFACTURING_METHODS: dict[str, dict[str, Any]] = {
@@ -133,6 +146,8 @@ ARCHITECTURE_MODES: dict[str, dict[str, Any]] = {
 }
 
 ZONE_STATIONS_IN = [41, 36, 31, 26, 21, 16, 11]
+AUDITOR_CPM_MIN = 0.0
+AUDITOR_CPM_MAX = 999.0
 
 
 @dataclass
@@ -145,6 +160,10 @@ class CpmCalibration:
 
 
 DEFAULT_CPM_CAL = CpmCalibration()
+
+
+def auditor_cpm_reading(value: float) -> float:
+    return max(AUDITOR_CPM_MIN, min(AUDITOR_CPM_MAX, float(value)))
 
 
 def default_segments(base_angle: float = 45.0, thickness_m: float = 0.000125) -> list[Segment]:
@@ -224,15 +243,23 @@ def overall_cpm(segments: list[Segment], material: Material, calibration: CpmCal
 def zone_profile(segments: list[Segment], material: Material, calibration: CpmCalibration) -> list[dict[str, float]]:
     ei = average_ei(segments, material)
     clamp = calibration.clamp_length_in
-    return [
-        {
-            "station_in": float(station),
-            "effective_span_in": max(1.0, station - clamp),
-            "cpm": calibration.zone_k
-            * sqrt(ei / ((calibration.profile_weight_g / 1000.0) * (max(1.0, station - clamp) * 0.0254) ** 3)),
-        }
-        for station in ZONE_STATIONS_IN
-    ]
+    rows = []
+    for station in ZONE_STATIONS_IN:
+        effective_span = max(1.0, station - clamp)
+        raw_cpm = calibration.zone_k * sqrt(
+            ei / ((calibration.profile_weight_g / 1000.0) * (effective_span * 0.0254) ** 3)
+        )
+        rows.append(
+            {
+                "station_in": float(station),
+                "effective_span_in": effective_span,
+                "cpm": auditor_cpm_reading(raw_cpm),
+                "raw_model_cpm": raw_cpm,
+                "analyzer_limited": raw_cpm > AUDITOR_CPM_MAX or raw_cpm < AUDITOR_CPM_MIN,
+                "analyzer_range": f"{AUDITOR_CPM_MIN:.0f}-{AUDITOR_CPM_MAX:.0f}",
+            }
+        )
+    return rows
 
 
 def tip_deflection_mm(segments: list[Segment], material: Material, load_n: float = 100.0) -> float:
@@ -294,6 +321,89 @@ def simulate_launch(cpm: float, head_speed_mph: float) -> dict[str, float]:
     }
 
 
+def fit_build_brief(
+    target_cpm: float,
+    torque_target: float,
+    wrap_angle: float,
+    launch_bias: str,
+    tip_strategy: str,
+    speed_mph: float,
+    tempo: str,
+    transition: str,
+    release: str,
+    miss: str,
+    feel: str,
+) -> dict[str, Any]:
+    torque_window = "stout" if torque_target <= 3.4 else "balanced" if torque_target <= 3.9 else "active"
+    material = "Mitsubishi MR70"
+    if speed_mph >= 105:
+        material = "Toray T800H"
+    if speed_mph >= 112 or transition == "Hard":
+        material = "Toray M40J"
+    if speed_mph >= 118 or feel == "Boardy/stout":
+        material = "Toray M46J"
+    if speed_mph < 98 and feel == "Softer load":
+        material = "Toray T700S"
+    if feel == "Boardy/stout" and speed_mph < 108:
+        material = "Hexcel IM7"
+    architecture = "braid_tape_braid" if transition == "Hard" else "flag_wrap"
+    if launch_bias.startswith("lower"):
+        architecture = "automated_tape" if transition != "Hard" else "braid_tape_braid"
+    if feel == "Softer load":
+        architecture = "hybrid_flag_helix"
+
+    intent = (
+        f"Build a {target_cpm:.1f} CPM shaft with a {torque_window} torque window, "
+        f"{launch_bias}, and {feel.lower()} feel."
+    )
+    rationale = [
+        f"{speed_mph:.0f} mph speed sets the base stiffness target.",
+        f"{tempo} tempo and {transition} transition adjust load stability.",
+        f"{release} release timing tunes how much the tip can recover.",
+        f"{miss} miss pattern biases the shaft away from the common miss.",
+    ]
+    build_steps = [
+        f"Set global target CPM to {target_cpm:.1f}.",
+        f"Use {material} as the starting material assumption.",
+        f"Set primary bias pair near +/-{wrap_angle:.0f} degrees.",
+        "Add a 0 degree butt/mid axial stability flag.",
+        tip_strategy.capitalize() + ".",
+        "Run CPM, torque, EI, and launch checks before freezing the CAD packet.",
+    ]
+    if feel == "Softer load":
+        build_steps.insert(4, "Add a thin S-glass or aramid damping layer before increasing carbon stiffness.")
+    if material in {"Toray M46J", "Mitsubishi Dialead K13C"}:
+        build_steps.append("Keep ultra-high-modulus material local; avoid making the whole shaft brittle or harsh.")
+    risks = []
+    if transition == "Hard" and feel == "Softer load":
+        risks.append("Hard transition conflicts with soft-load feel; prototype both torque and tip response before committing.")
+    if miss == "Right" and launch_bias.startswith("lower"):
+        risks.append("Right miss plus lower-launch target can feel too tip-stiff if overbuilt.")
+    if torque_target <= 2.8:
+        risks.append("Very low torque target may require extra hoop/braid support and could add harsh feel.")
+    if speed_mph >= 115:
+        risks.append("High-speed player: validate tip recovery and face closure with real range data.")
+    if not risks:
+        risks.append("No major conflict detected; still validate against measured CPM and player feedback.")
+
+    test_plan = [
+        "Build one baseline prototype from the generated CAD packet.",
+        "Measure 7-zone CPM and compare each station to the target profile.",
+        "Hit-test launch, spin, start line, and miss pattern before changing CAD.",
+        "Adjust one variable at a time: wrap angle, tip flag width, or hoop/braid support.",
+    ]
+    return {
+        "intent": intent,
+        "torque_window": torque_window,
+        "recommended_material": material,
+        "recommended_architecture": architecture,
+        "rationale": rationale,
+        "build_steps": build_steps,
+        "risk_flags": risks,
+        "test_plan": test_plan,
+    }
+
+
 def fit_target_from_swing(
     speed_mph: float = 105.0,
     launch_deg: float = 13.5,
@@ -349,14 +459,37 @@ def fit_target_from_swing(
         {"station": 16, "cpm": target_cpm + 15.0},
         {"station": 11, "cpm": target_cpm + 24.0},
     ]
+    brief = fit_build_brief(
+        target_cpm,
+        torque_target,
+        wrap_angle,
+        launch_bias,
+        tip_strategy,
+        speed_mph,
+        tempo,
+        transition,
+        release,
+        miss,
+        feel,
+    )
     return {
         "target_cpm": target_cpm,
+        "target_cpm_window": {"low": target_cpm - 3.0, "high": target_cpm + 3.0},
         "target_weight_g": weight_g,
         "torque_target_deg": torque_target,
         "wrap_angle_deg": wrap_angle,
         "launch_bias": launch_bias,
         "tip_strategy": tip_strategy,
         "zone_profile": profile,
+        "builder_brief": brief,
+        "cad_translation": {
+            "set_target_cpm": target_cpm,
+            "set_wrap_angle_deg": wrap_angle,
+            "bias_pair_deg": [wrap_angle, -wrap_angle],
+            "tip_strategy": tip_strategy,
+            "recommended_architecture": brief["recommended_architecture"],
+            "recommended_material": brief["recommended_material"],
+        },
         "inputs": {
             "speed": speed_mph,
             "launch": launch_deg,
@@ -711,6 +844,16 @@ def home() -> str:
     .export-row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-top: 8px; }
     .fit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
     .fit-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+    .fit-builder-brief { border: 1px solid #cbd8d5; background: #f9fbfa; border-radius: 6px; padding: 12px; margin: 12px 0; }
+    .fit-builder-brief h3 { margin-top: 0; }
+    .brief-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .brief-card { border: 1px solid #d9e4e1; background: #ffffff; border-radius: 6px; padding: 10px; min-height: 96px; }
+    .brief-card span { display: block; color: #50615e; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+    .brief-card strong { display: block; color: #17211f; font-size: 20px; margin: 5px 0; }
+    .brief-card p { margin: 6px 0 0; color: #344642; line-height: 1.35; }
+    .brief-list { margin: 6px 0 0; padding-left: 18px; color: #243532; }
+    .brief-list li { margin: 4px 0; }
+    .risk-list li { color: #6d2d00; }
     .cad-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
     .cad-chip { background: #17211f; color: #d7fff6; padding: 10px; border-radius: 6px; font-size: 13px; }
     .cad-chip strong { display: block; color: white; font-size: 18px; margin-top: 4px; }
@@ -781,7 +924,7 @@ def home() -> str:
       .cad-drawing-canvas { min-height: 520px; height: 64vh; }
       .cad-right-panel { max-height: none; }
     }
-    @media (max-width: 900px) { main, .grid2, .guidance-card { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
+    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
     @media (max-width: 560px) { header { align-items: flex-start; flex-direction: column; } .metrics, .mini-grid, .primary-actions .secondary-row { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -873,6 +1016,8 @@ def home() -> str:
                 <th>nu12</th>
                 <th>Density</th>
                 <th>Cost/kg</th>
+                <th>Family</th>
+                <th>Design Role</th>
               </tr>
             </thead>
             <tbody id="materialRows"></tbody>
@@ -1011,6 +1156,31 @@ def home() -> str:
         <div class="fit-actions">
           <button id="fitSyncPacketBtn" class="secondary" onclick="downloadFitCadPacket(this)">Export Fit-CAD Packet</button>
           <button id="fitPullCadBtn" class="secondary" onclick="pullCadIntoFit(this)">Pull CAD -> Fit Inputs</button>
+        </div>
+        <div class="fit-builder-brief">
+          <h3>AI Shaft Builder Brief</h3>
+          <div class="brief-grid">
+            <div class="brief-card">
+              <span>Build Intent</span>
+              <strong id="fitIntentTitle">Generate a shaft target</strong>
+              <p id="fitIntentText">Enter swing inputs, then generate the shaft target to get a buildable design brief.</p>
+            </div>
+            <div class="brief-card">
+              <span>CAD Recipe</span>
+              <strong id="fitRecipeTitle">Waiting</strong>
+              <ul id="fitRecipeList" class="brief-list"><li>No CAD recipe yet.</li></ul>
+            </div>
+            <div class="brief-card">
+              <span>Risk Flags</span>
+              <strong id="fitRiskTitle">Not checked</strong>
+              <ul id="fitRiskList" class="brief-list risk-list"><li>Run Fit-to-Build first.</li></ul>
+            </div>
+            <div class="brief-card">
+              <span>Prototype Test Plan</span>
+              <strong id="fitTestTitle">Next validation</strong>
+              <ul id="fitTestList" class="brief-list"><li>Build brief will create the first test plan.</li></ul>
+            </div>
+          </div>
         </div>
         <h3>CPM Calibration (Clamp / Weight Rig)</h3>
         <div class="fit-grid">
@@ -1707,9 +1877,19 @@ def home() -> str:
 
     function defaultMaterialLibrary() {
       return {
-        'Mitsubishi MR70': { name: 'Mitsubishi MR70', e1_pa: 161e9, e2_pa: 8.7e9, g12_pa: 4.5e9, nu12: 0.32, density_kg_m3: 1600.0, cost_per_kg: 95.0 },
-        'Toray T1100G': { name: 'Toray T1100G', e1_pa: 215e9, e2_pa: 8.5e9, g12_pa: 4.2e9, nu12: 0.33, density_kg_m3: 1580.0, cost_per_kg: 125.0 },
-        'Hexcel IM7': { name: 'Hexcel IM7', e1_pa: 276e9, e2_pa: 14.0e9, g12_pa: 5.2e9, nu12: 0.31, density_kg_m3: 1620.0, cost_per_kg: 140.0 },
+        'Mitsubishi MR70': { name: 'Mitsubishi MR70', e1_pa: 161e9, e2_pa: 8.7e9, g12_pa: 4.5e9, nu12: 0.32, density_kg_m3: 1600.0, cost_per_kg: 95.0, family: 'Carbon fiber', design_role: 'Smooth load, balanced strength/stiffness shaft body', data_quality: 'Engineering estimate' },
+        'Toray T1100G': { name: 'Toray T1100G', e1_pa: 215e9, e2_pa: 8.5e9, g12_pa: 4.2e9, nu12: 0.33, density_kg_m3: 1580.0, cost_per_kg: 125.0, family: 'Carbon fiber', design_role: 'High strength, stable premium driver shaft body', data_quality: 'Engineering estimate' },
+        'Hexcel IM7': { name: 'Hexcel IM7', e1_pa: 276e9, e2_pa: 14.0e9, g12_pa: 5.2e9, nu12: 0.31, density_kg_m3: 1620.0, cost_per_kg: 140.0, family: 'Carbon fiber', design_role: 'Firm mid/butt reinforcement and stout feel tuning', data_quality: 'Engineering estimate' },
+        'Toray T700S': { name: 'Toray T700S', e1_pa: 230e9, e2_pa: 15.0e9, g12_pa: 5.0e9, nu12: 0.30, density_kg_m3: 1600.0, cost_per_kg: 55.0, family: 'Carbon fiber', design_role: 'Lower-cost standard/intermediate modulus baseline', data_quality: 'Engineering estimate' },
+        'Toray T800H': { name: 'Toray T800H', e1_pa: 294e9, e2_pa: 13.0e9, g12_pa: 5.0e9, nu12: 0.31, density_kg_m3: 1590.0, cost_per_kg: 85.0, family: 'Carbon fiber', design_role: 'Lightweight premium mid/high modulus shaft body', data_quality: 'Engineering estimate' },
+        'Toray M40J': { name: 'Toray M40J', e1_pa: 377e9, e2_pa: 9.0e9, g12_pa: 4.4e9, nu12: 0.32, density_kg_m3: 1600.0, cost_per_kg: 185.0, family: 'High modulus carbon', design_role: 'Butt/mid stiffness without large mass increase', data_quality: 'Engineering estimate' },
+        'Toray M46J': { name: 'Toray M46J', e1_pa: 436e9, e2_pa: 8.0e9, g12_pa: 4.0e9, nu12: 0.32, density_kg_m3: 1600.0, cost_per_kg: 240.0, family: 'Ultra high modulus carbon', design_role: 'Very stiff local reinforcement; use carefully in tip', data_quality: 'Engineering estimate' },
+        'Mitsubishi Dialead K13C': { name: 'Mitsubishi Dialead K13C', e1_pa: 640e9, e2_pa: 7.0e9, g12_pa: 3.7e9, nu12: 0.32, density_kg_m3: 1700.0, cost_per_kg: 420.0, family: 'Pitch-based high modulus carbon', design_role: 'Specialty ultra-stiff strips, low-strain zone tuning', data_quality: 'Engineering estimate' },
+        'S-Glass Damping Layer': { name: 'S-Glass Damping Layer', e1_pa: 86e9, e2_pa: 86e9, g12_pa: 35.0e9, nu12: 0.22, density_kg_m3: 2000.0, cost_per_kg: 22.0, family: 'Glass fiber', design_role: 'Damping, toughness, hoop support, smoother feel', data_quality: 'Engineering estimate' },
+        'E-Glass Hoop Layer': { name: 'E-Glass Hoop Layer', e1_pa: 73e9, e2_pa: 73e9, g12_pa: 30.0e9, nu12: 0.22, density_kg_m3: 1950.0, cost_per_kg: 14.0, family: 'Glass fiber', design_role: 'Budget hoop stability and impact tolerance', data_quality: 'Engineering estimate' },
+        'Kevlar 49 Aramid': { name: 'Kevlar 49 Aramid', e1_pa: 130e9, e2_pa: 5.5e9, g12_pa: 2.8e9, nu12: 0.34, density_kg_m3: 1440.0, cost_per_kg: 65.0, family: 'Aramid fiber', design_role: 'Vibration damping and impact-tough bias/veil layer', data_quality: 'Engineering estimate' },
+        'Basalt Fiber': { name: 'Basalt Fiber', e1_pa: 89e9, e2_pa: 89e9, g12_pa: 32.0e9, nu12: 0.24, density_kg_m3: 2000.0, cost_per_kg: 18.0, family: 'Basalt fiber', design_role: 'Durable damping layer between glass and carbon behavior', data_quality: 'Engineering estimate' },
+        'Boron Fiber Prepreg': { name: 'Boron Fiber Prepreg', e1_pa: 400e9, e2_pa: 30.0e9, g12_pa: 14.0e9, nu12: 0.23, density_kg_m3: 2550.0, cost_per_kg: 520.0, family: 'Boron fiber', design_role: 'Heavy, expensive, very stable local reinforcement', data_quality: 'Engineering estimate' },
       };
     }
 
@@ -1723,6 +1903,9 @@ def home() -> str:
         nu12: Math.max(0, Math.min(0.49, numberOr(mat?.nu12, 0.32))),
         density_kg_m3: Math.max(1, numberOr(mat?.density_kg_m3, 1600)),
         cost_per_kg: Math.max(0, numberOr(mat?.cost_per_kg, 100)),
+        family: String(mat?.family || 'Custom'),
+        design_role: String(mat?.design_role || 'General shaft laminate'),
+        data_quality: String(mat?.data_quality || 'User supplied'),
       };
     }
 
@@ -1756,6 +1939,8 @@ def home() -> str:
           <td><input type="number" step="0.01" value="${m.nu12.toFixed(3)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'nu12', this.value)"></td>
           <td><input type="number" step="1" value="${m.density_kg_m3.toFixed(0)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'density_kg_m3', this.value)"></td>
           <td><input type="number" step="1" value="${m.cost_per_kg.toFixed(0)}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'cost_per_kg', this.value)"></td>
+          <td><input type="text" value="${m.family || ''}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'family', this.value)"></td>
+          <td><input type="text" value="${m.design_role || ''}" onchange="updateMaterialField('${name.replace(/'/g, "\\'")}', 'design_role', this.value)"></td>
         </tr>`;
       }).join('');
     }
@@ -1783,6 +1968,8 @@ def home() -> str:
       else if (field === 'nu12') next.nu12 = Math.max(0, Math.min(0.49, numberOr(value, next.nu12)));
       else if (field === 'density_kg_m3') next.density_kg_m3 = Math.max(1, numberOr(value, next.density_kg_m3));
       else if (field === 'cost_per_kg') next.cost_per_kg = Math.max(0, numberOr(value, next.cost_per_kg));
+      else if (field === 'family') next.family = String(value || '').trim() || 'Custom';
+      else if (field === 'design_role') next.design_role = String(value || '').trim() || 'General shaft laminate';
       materialLibrary[key] = next;
       designHistoryCommit(`material updated: ${next.name}`);
     }
@@ -2388,7 +2575,7 @@ def home() -> str:
       updateGuidanceCard(latest);
 
       document.getElementById('zones').innerHTML = latest.zone_profile.map(
-        z => `<tr><td>${z.station_in}"</td><td>${z.cpm.toFixed(1)} <small>+${(z.tape_boost || 0).toFixed(1)}</small></td></tr>`
+        z => `<tr><td>${z.station_in}"</td><td>${zoneCpmDisplay(z)}</td></tr>`
       ).join('');
 
       const launch = latest.launch_simulation;
@@ -2495,8 +2682,117 @@ def home() -> str:
       });
     }
 
+    function auditorCpmReading(value) {
+      return Math.max(0, Math.min(999, Number(value) || 0));
+    }
+
+    function zoneCpmDisplay(zone) {
+      const cpm = auditorCpmReading(zone.cpm);
+      const boost = Number(zone.tape_boost || 0);
+      const raw = Number(zone.raw_model_cpm ?? zone.raw_cpm ?? cpm);
+      const limited = Boolean(zone.analyzer_limited) || raw > 999 || raw < 0;
+      const boostText = boost ? ` <small>+${boost.toFixed(1)}</small>` : '';
+      const limitText = limited ? ` <small>limited ${raw.toFixed(1)}</small>` : '';
+      return `${cpm.toFixed(1)}${boostText}${limitText}`;
+    }
+
     function fitMultiplier(value, mapping) {
       return mapping[value] || 0;
+    }
+
+    function escapeFitText(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+    }
+
+    function fitTorqueWindow(torqueTarget) {
+      return torqueTarget <= 3.4 ? 'stout' : torqueTarget <= 3.9 ? 'balanced' : 'active';
+    }
+
+    function fitBuildBrief(profile) {
+      const inputs = profile.inputs || {};
+      const torqueWindow = fitTorqueWindow(profile.torque_target_deg);
+      let material = 'Mitsubishi MR70';
+      if (inputs.speed >= 105) material = 'Toray T800H';
+      if (inputs.speed >= 112 || inputs.transition === 'Hard') material = 'Toray M40J';
+      if (inputs.speed >= 118 || inputs.feel === 'Boardy/stout') material = 'Toray M46J';
+      if (inputs.speed < 98 && inputs.feel === 'Softer load') material = 'Toray T700S';
+      if (inputs.feel === 'Boardy/stout' && inputs.speed < 108) material = 'Hexcel IM7';
+      let architecture = inputs.transition === 'Hard' ? 'braid_tape_braid' : 'flag_wrap';
+      if (profile.launch_bias.includes('lower')) architecture = inputs.transition === 'Hard' ? 'braid_tape_braid' : 'automated_tape';
+      if (inputs.feel === 'Softer load') architecture = 'hybrid_flag_helix';
+
+      const rationale = [
+        `${inputs.speed.toFixed(0)} mph speed sets the base stiffness target.`,
+        `${inputs.tempo} tempo and ${inputs.transition} transition adjust load stability.`,
+        `${inputs.release} release timing tunes how much the tip can recover.`,
+        `${inputs.miss} miss pattern biases the shaft away from the common miss.`
+      ];
+      const buildSteps = [
+        `Set global target CPM to ${profile.target_cpm.toFixed(1)}.`,
+        `Use ${material} as the starting material assumption.`,
+        `Set primary bias pair near +/-${profile.wrap_angle_deg.toFixed(0)} degrees.`,
+        'Add a 0 degree butt/mid axial stability flag.',
+        profile.tip_strategy.charAt(0).toUpperCase() + profile.tip_strategy.slice(1) + '.',
+        'Run CPM, torque, EI, and launch checks before freezing the CAD packet.'
+      ];
+      if (inputs.feel === 'Softer load') {
+        buildSteps.splice(4, 0, 'Add a thin S-glass or aramid damping layer before increasing carbon stiffness.');
+      }
+      if (['Toray M46J', 'Mitsubishi Dialead K13C'].includes(material)) {
+        buildSteps.push('Keep ultra-high-modulus material local; avoid making the whole shaft brittle or harsh.');
+      }
+      const risks = [];
+      if (inputs.transition === 'Hard' && inputs.feel === 'Softer load') {
+        risks.push('Hard transition conflicts with soft-load feel; prototype both torque and tip response before committing.');
+      }
+      if (inputs.miss === 'Right' && profile.launch_bias.includes('lower')) {
+        risks.push('Right miss plus lower-launch target can feel too tip-stiff if overbuilt.');
+      }
+      if (profile.torque_target_deg <= 2.8) {
+        risks.push('Very low torque target may require extra hoop/braid support and could add harsh feel.');
+      }
+      if (inputs.speed >= 115) {
+        risks.push('High-speed player: validate tip recovery and face closure with real range data.');
+      }
+      if (!risks.length) {
+        risks.push('No major conflict detected; still validate against measured CPM and player feedback.');
+      }
+      const testPlan = [
+        'Build one baseline prototype from the generated CAD packet.',
+        'Measure 7-zone CPM and compare each station to the target profile.',
+        'Hit-test launch, spin, start line, and miss pattern before changing CAD.',
+        'Adjust one variable at a time: wrap angle, tip flag width, or hoop/braid support.'
+      ];
+      return {
+        intent: `Build a ${profile.target_cpm.toFixed(1)} CPM shaft with a ${torqueWindow} torque window, ${profile.launch_bias}, and ${String(inputs.feel).toLowerCase()} feel.`,
+        torque_window: torqueWindow,
+        recommended_material: material,
+        recommended_architecture: architecture,
+        rationale,
+        build_steps: buildSteps,
+        risk_flags: risks,
+        test_plan: testPlan
+      };
+    }
+
+    function renderFitBuilderBrief(profile) {
+      const brief = profile?.builder_brief || fitBuildBrief(profile);
+      const recipeTitle = `${brief.recommended_material} / ${brief.recommended_architecture.replace(/_/g, ' ')}`;
+      const riskTitle = brief.risk_flags.length === 1 && brief.risk_flags[0].startsWith('No major') ? 'Clean first pass' : `${brief.risk_flags.length} warning${brief.risk_flags.length === 1 ? '' : 's'}`;
+      document.getElementById('fitIntentTitle').textContent = `${profile.target_cpm.toFixed(1)} CPM / ${brief.torque_window} torque`;
+      document.getElementById('fitIntentText').textContent = brief.intent;
+      document.getElementById('fitRecipeTitle').textContent = recipeTitle;
+      document.getElementById('fitRecipeList').innerHTML = brief.build_steps.map(step => `<li>${escapeFitText(step)}</li>`).join('');
+      document.getElementById('fitRiskTitle').textContent = riskTitle;
+      document.getElementById('fitRiskList').innerHTML = brief.risk_flags.map(flag => `<li>${escapeFitText(flag)}</li>`).join('');
+      document.getElementById('fitTestTitle').textContent = 'One-change-at-a-time plan';
+      document.getElementById('fitTestList').innerHTML = brief.test_plan.map(step => `<li>${escapeFitText(step)}</li>`).join('');
     }
 
     function buildFitCadPacket() {
@@ -2518,7 +2814,9 @@ def home() -> str:
           set_target_cpm: latestFitProfile.target_cpm,
           set_wrap_angle_deg: latestFitProfile.wrap_angle_deg,
           bias_pair_deg: [latestFitProfile.wrap_angle_deg, -latestFitProfile.wrap_angle_deg],
-          tip_strategy: latestFitProfile.tip_strategy
+          tip_strategy: latestFitProfile.tip_strategy,
+          recommended_material: latestFitProfile.builder_brief?.recommended_material,
+          recommended_architecture: latestFitProfile.builder_brief?.recommended_architecture
         }
       };
     }
@@ -2551,7 +2849,9 @@ def home() -> str:
         ['CAD Mode', packet.cad_state.architecture_mode],
         ['CAD Flag Count', String(packet.cad_state.flag_count)],
         ['Transfer CPM', packet.transfer.set_target_cpm.toFixed(1)],
-        ['Transfer Wrap Angle', packet.transfer.set_wrap_angle_deg.toFixed(0) + ' deg']
+        ['Transfer Wrap Angle', packet.transfer.set_wrap_angle_deg.toFixed(0) + ' deg'],
+        ['Transfer Material', packet.transfer.recommended_material || 'n/a'],
+        ['Transfer Architecture', (packet.transfer.recommended_architecture || 'n/a').replace(/_/g, ' ')]
       ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
 
       const cpmDelta = Math.abs(packet.transfer.set_target_cpm - packet.cad_state.target_cpm_input);
@@ -2563,7 +2863,8 @@ def home() -> str:
         ['CPM Alignment Error', cpmDelta.toFixed(2)],
         ['Angle Alignment Error', wrapDelta.toFixed(2) + ' deg'],
         ['Torque Window', torqueWindow],
-        ['Launch Intent', latestFitProfile.launch_bias]
+        ['Launch Intent', latestFitProfile.launch_bias],
+        ['Risk Flags', String(latestFitProfile.builder_brief?.risk_flags?.length || 0)]
       ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
     }
 
@@ -2605,6 +2906,7 @@ def home() -> str:
 
       latestFitProfile = {
         target_cpm: targetCpm,
+        target_cpm_window: {low: targetCpm - 3, high: targetCpm + 3},
         target_weight_g: weight,
         torque_target_deg: torqueTarget,
         wrap_angle_deg: wrapAngle,
@@ -2613,18 +2915,37 @@ def home() -> str:
         zone_profile: profile,
         inputs: {speed, launch, spin, weight, tempo, transition, release, miss, feel}
       };
+      latestFitProfile.builder_brief = fitBuildBrief(latestFitProfile);
+      latestFitProfile.cad_translation = {
+        set_target_cpm: targetCpm,
+        set_wrap_angle_deg: wrapAngle,
+        bias_pair_deg: [wrapAngle, -wrapAngle],
+        tip_strategy: tipBias,
+        recommended_material: latestFitProfile.builder_brief.recommended_material,
+        recommended_architecture: latestFitProfile.builder_brief.recommended_architecture
+      };
 
       document.getElementById('fitProfile').innerHTML = [
         ['Target Overall CPM', targetCpm.toFixed(1)],
+        ['CPM Build Window', `${(targetCpm - 3).toFixed(1)} - ${(targetCpm + 3).toFixed(1)}`],
         ['Target Weight', weight.toFixed(0) + ' g'],
         ['Torque Target', torqueTarget.toFixed(2) + ' deg'],
         ['Wrap Angle', wrapAngle.toFixed(0) + ' deg'],
+        ['Material Starting Point', latestFitProfile.builder_brief.recommended_material],
+        ['Architecture Starting Point', latestFitProfile.builder_brief.recommended_architecture.replace(/_/g, ' ')],
         ['Launch Bias', launchBias],
         ['Tip Strategy', tipBias]
       ].map(row => `<tr><td>${row[0]}</td><td>${row[1]}</td></tr>`).join('');
 
       document.getElementById('fitBuild').textContent = JSON.stringify({
-        shaft_target: latestFitProfile,
+        shaft_target: {
+          target_cpm: latestFitProfile.target_cpm,
+          target_cpm_window: latestFitProfile.target_cpm_window,
+          torque_target_deg: latestFitProfile.torque_target_deg,
+          target_weight_g: latestFitProfile.target_weight_g,
+          zone_profile: latestFitProfile.zone_profile
+        },
+        builder_brief: latestFitProfile.builder_brief,
         cad_translation: {
           set_target_cpm: targetCpm,
           set_wrap_angle: wrapAngle,
@@ -2636,6 +2957,7 @@ def home() -> str:
           ]
         }
       }, null, 2);
+      renderFitBuilderBrief(latestFitProfile);
       renderFitBridge('fit-generated');
     }
 
@@ -2645,6 +2967,17 @@ def home() -> str:
       document.getElementById('target').value = latestFitProfile.target_cpm.toFixed(1);
       document.getElementById('angle').value = latestFitProfile.wrap_angle_deg.toFixed(0);
       document.getElementById('speed').value = latestFitProfile.inputs.speed;
+      const materialSelect = document.getElementById('material');
+      const architectureSelect = document.getElementById('architectureMode');
+      const methodSelect = document.getElementById('method');
+      const recommendedMaterial = latestFitProfile.builder_brief?.recommended_material;
+      const recommendedArchitecture = latestFitProfile.builder_brief?.recommended_architecture;
+      if (materialSelect && recommendedMaterial) materialSelect.value = recommendedMaterial;
+      if (architectureSelect && recommendedArchitecture) architectureSelect.value = recommendedArchitecture;
+      if (methodSelect && recommendedArchitecture && Array.from(methodSelect.options).some(option => option.value === recommendedArchitecture)) {
+        methodSelect.value = recommendedArchitecture;
+      }
+      if (typeof updateArchitecturePanel === 'function') updateArchitecturePanel();
       flags = [
         {name: 'Fit axial butt', length: 430, root: 94, tip: 78, angle: 0, station: 'Butt', layer: 'axial', locked: false},
         {name: 'Fit bias +', length: 370, root: 80, tip: 52, angle: latestFitProfile.wrap_angle_deg, station: 'Mid', layer: 'bias', locked: false},
@@ -3830,11 +4163,15 @@ ${y2.toFixed(3)}
     function tapeAdjustedZoneProfile(baseProfile) {
       return baseProfile.map(zone => {
         const localBoost = tapeStiffnessIndexAtStation(Number(zone.station_in));
+        const rawBase = Number(zone.raw_model_cpm ?? zone.raw_cpm ?? zone.cpm);
+        const rawAdjusted = rawBase + localBoost;
         return {
           ...zone,
           base_cpm: zone.cpm,
+          raw_model_cpm: rawAdjusted,
           tape_boost: localBoost,
-          cpm: zone.cpm + localBoost
+          cpm: auditorCpmReading(rawAdjusted),
+          analyzer_limited: Boolean(zone.analyzer_limited) || rawAdjusted > 999 || rawAdjusted < 0
         };
       });
     }
@@ -3905,7 +4242,7 @@ ${y2.toFixed(3)}
       document.getElementById('torsion').textContent = latest.torsion_deflection_deg_15nm.toFixed(1) + ' deg';
 
       document.getElementById('zones').innerHTML = latest.zone_profile.map(
-        z => `<tr><td>${z.station_in}"</td><td>${z.cpm.toFixed(1)} <small>+${(z.tape_boost || 0).toFixed(1)}</small></td></tr>`
+        z => `<tr><td>${z.station_in}"</td><td>${zoneCpmDisplay(z)}</td></tr>`
       ).join('');
 
       const launch = latest.launch_simulation;
