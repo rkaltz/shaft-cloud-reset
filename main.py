@@ -644,13 +644,13 @@ def home() -> str:
     .build-fingerprint .fp-bad { color: #a5261e; font-weight: 700; }
     .build-fingerprint button { width: auto; margin: 0; padding: 5px 9px; font-size: 12px; }
     .viewer-note { color: #8a4d00; font-weight: 700; margin-left: 8px; }
-    main { display: grid; grid-template-columns: 340px 1fr; gap: 0; min-height: calc(100vh - 111px); }
+    main { display: grid; grid-template-columns: 360px 1fr; gap: 0; min-height: calc(100vh - 111px); }
     section { background: #f8fbfa; border-right: 1px solid #b9c8c4; padding: 16px; }
     section.workspace { background: #eef2f0; border-right: 0; padding: 0; }
-    .workspace-head { display: flex; justify-content: space-between; align-items: center; background: #ffffff; border-bottom: 1px solid #cdd9d6; padding: 12px 14px; }
+    .workspace-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #ffffff; border-bottom: 1px solid #cdd9d6; padding: 12px 14px; }
     .workspace-title { font-size: 18px; font-weight: 700; }
-    .tabs { display: flex; gap: 6px; }
-    .tab { width: auto; margin: 0; padding: 8px 12px; background: #d7e2df; color: #17211f; border: 1px solid #b9c8c4; border-radius: 6px; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .tab { width: auto; margin: 0; padding: 8px 12px; min-height: 38px; background: #d7e2df; color: #17211f; border: 1px solid #b9c8c4; border-radius: 6px; }
     .tab.active { background: #17695f; color: white; }
     .view { padding: 16px; }
     .hidden { display: none; }
@@ -661,6 +661,21 @@ def home() -> str:
     button.danger { background: #b3261e; color: #ffffff; }
     button.clicked { background: #d9911f; color: #17211f; }
     .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .quick-start { background: #ffffff; border: 1px solid #cbd8d5; border-left: 5px solid #17695f; border-radius: 8px; padding: 12px; margin: 10px 0 14px; }
+    .quick-start strong { display: block; margin-bottom: 4px; font-size: 15px; }
+    .quick-start span { display: block; color: #50615e; font-size: 13px; line-height: 1.35; }
+    .primary-actions { position: sticky; top: 0; z-index: 3; background: #f8fbfa; border: 1px solid #cbd8d5; border-radius: 8px; padding: 10px; margin-top: 14px; box-shadow: 0 8px 18px rgba(23, 33, 31, 0.08); }
+    .primary-actions button { margin-top: 8px; }
+    .primary-actions .secondary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    details.control-group { border: 1px solid #cbd8d5; border-radius: 8px; background: #ffffff; margin-top: 12px; overflow: hidden; }
+    details.control-group summary { cursor: pointer; padding: 11px 12px; font-weight: 800; color: #17211f; background: #eef5f3; }
+    details.control-group .control-body { padding: 0 12px 12px; }
+    .guidance-card { background: #ffffff; border: 1px solid #cbd8d5; border-left: 5px solid #17695f; border-radius: 8px; padding: 12px; margin: 12px 0 14px; display: grid; grid-template-columns: minmax(150px, 0.7fr) 1fr; gap: 10px; align-items: center; }
+    .guidance-card.warn { border-left-color: #d9911f; }
+    .guidance-card.bad { border-left-color: #b3261e; }
+    .guidance-card span { display: block; color: #50615e; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+    .guidance-card strong { display: block; font-size: 20px; margin-top: 3px; }
+    .guidance-card p { margin: 0; color: #263834; line-height: 1.4; }
     .panel-title { margin-top: 18px; padding-top: 14px; border-top: 1px solid #dbe4e1; font-size: 16px; }
     .debug-panel { margin-top: 14px; border: 1px solid #cbd8d5; border-radius: 6px; background: #ffffff; padding: 10px; }
     .debug-panel h3 { margin: 0 0 8px; font-size: 14px; }
@@ -766,7 +781,8 @@ def home() -> str:
       .cad-drawing-canvas { min-height: 520px; height: 64vh; }
       .cad-right-panel { max-height: none; }
     }
-    @media (max-width: 900px) { main, .grid2 { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 900px) { main, .grid2, .guidance-card { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
+    @media (max-width: 560px) { header { align-items: flex-start; flex-direction: column; } .metrics, .mini-grid, .primary-actions .secondary-row { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -791,6 +807,10 @@ def home() -> str:
   <main>
     <section>
       <h2>Design Inputs</h2>
+      <div class="quick-start">
+        <strong>Quick workflow</strong>
+        <span>Set the shaft target, run the analysis, then move through Simulation, Fit-to-Build, and CAD when you want more detail.</span>
+      </div>
       <label>Target CPM</label>
       <input id="target" type="number" value="255" step="0.1">
       <label>Head Weight (g)</label>
@@ -805,31 +825,6 @@ def home() -> str:
         <option>Toray T1100G</option>
         <option>Hexcel IM7</option>
       </select>
-      <h3 class="panel-title">Material Library</h3>
-      <div class="tool-row">
-        <button id="materialAddBtn" class="secondary">Add Material</button>
-        <button id="materialDuplicateBtn" class="secondary">Duplicate Selected</button>
-        <button id="materialDeleteBtn" class="secondary">Delete Selected</button>
-      </div>
-      <div class="tool-row">
-        <button id="materialExportBtn" class="secondary">Export Materials</button>
-        <button id="materialImportBtn" class="secondary">Import Materials</button>
-        <input id="materialFile" type="file" accept="application/json,.json" style="display:none" onchange="loadMaterialsFile(event)">
-      </div>
-      <table class="editable-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>E1 (GPa)</th>
-            <th>E2 (GPa)</th>
-            <th>G12 (GPa)</th>
-            <th>nu12</th>
-            <th>Density</th>
-            <th>Cost/kg</th>
-          </tr>
-        </thead>
-        <tbody id="materialRows"></tbody>
-      </table>
       <label>Manufacturing Method</label>
       <select id="method">
         <option value="roll_wrapped">Roll-wrapped prepreg</option>
@@ -848,53 +843,98 @@ def home() -> str:
         <option value="automated_tape">Automated tape placement</option>
         <option value="braid_tape_braid">Braid-tape-braid hybrid</option>
       </select>
-      <h3 class="panel-title">G-Code Settings</h3>
-      <label>Units</label>
-      <select id="gcodeUnits">
-        <option value="mm">Millimeters (G21)</option>
-        <option value="inch">Inches (G20)</option>
-      </select>
-      <div class="mini-grid">
-        <div>
-          <label>Tool #</label>
-          <input id="toolNumber" type="number" value="1" step="1" min="1">
-        </div>
-        <div>
-          <label>Passes</label>
-          <input id="passCount" type="number" value="1" step="1" min="1" max="8">
+      <div class="primary-actions">
+        <button id="analyzeBtn" onclick="run(this)">Analyze Shaft</button>
+        <div class="secondary-row">
+          <button id="exportJsonBtn" class="secondary" onclick="downloadJson(this)">Export JSON</button>
+          <button id="exportGcodeBtn" class="secondary" onclick="downloadGcode(this)">Export G-Code</button>
         </div>
       </div>
-      <label>Spindle RPM</label>
-      <input id="spindleRpm" type="number" value="1200" step="50" min="0">
-      <div class="mini-grid">
-        <div>
-          <label>Rapid Feed</label>
-          <input id="rapidFeed" type="number" value="600" step="10" min="1">
+      <details class="control-group">
+        <summary>Material Library</summary>
+        <div class="control-body">
+          <div class="tool-row">
+            <button id="materialAddBtn" class="secondary">Add Material</button>
+            <button id="materialDuplicateBtn" class="secondary">Duplicate Selected</button>
+            <button id="materialDeleteBtn" class="secondary">Delete Selected</button>
+          </div>
+          <div class="tool-row">
+            <button id="materialExportBtn" class="secondary">Export Materials</button>
+            <button id="materialImportBtn" class="secondary">Import Materials</button>
+            <input id="materialFile" type="file" accept="application/json,.json" style="display:none" onchange="loadMaterialsFile(event)">
+          </div>
+          <table class="editable-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>E1 (GPa)</th>
+                <th>E2 (GPa)</th>
+                <th>G12 (GPa)</th>
+                <th>nu12</th>
+                <th>Density</th>
+                <th>Cost/kg</th>
+              </tr>
+            </thead>
+            <tbody id="materialRows"></tbody>
+          </table>
         </div>
-        <div>
-          <label>Cut Feed</label>
-          <input id="cutFeed" type="number" value="180" step="10" min="1">
+      </details>
+      <details class="control-group">
+        <summary>G-Code Settings</summary>
+        <div class="control-body">
+          <label>Units</label>
+          <select id="gcodeUnits">
+            <option value="mm">Millimeters (G21)</option>
+            <option value="inch">Inches (G20)</option>
+          </select>
+          <div class="mini-grid">
+            <div>
+              <label>Tool #</label>
+              <input id="toolNumber" type="number" value="1" step="1" min="1">
+            </div>
+            <div>
+              <label>Passes</label>
+              <input id="passCount" type="number" value="1" step="1" min="1" max="8">
+            </div>
+          </div>
+          <label>Spindle RPM</label>
+          <input id="spindleRpm" type="number" value="1200" step="50" min="0">
+          <div class="mini-grid">
+            <div>
+              <label>Rapid Feed</label>
+              <input id="rapidFeed" type="number" value="600" step="10" min="1">
+            </div>
+            <div>
+              <label>Cut Feed</label>
+              <input id="cutFeed" type="number" value="180" step="10" min="1">
+            </div>
+          </div>
+          <label>Spin Feed</label>
+          <input id="spinFeed" type="number" value="300" step="10" min="1">
         </div>
-      </div>
-      <label>Spin Feed</label>
-      <input id="spinFeed" type="number" value="300" step="10" min="1">
-      <button id="analyzeBtn" onclick="run(this)">Analyze Shaft</button>
-      <button id="exportJsonBtn" class="secondary" onclick="downloadJson(this)">Export JSON</button>
-      <button id="exportGcodeBtn" class="secondary" onclick="downloadGcode(this)">Export G-Code</button>
-      <div class="debug-panel">
-        <h3>Debug / Health</h3>
-        <table><tbody id="debugHealth"></tbody></table>
-        <label><input id="strictModeToggle" type="checkbox" onchange="setStrictMode(this.checked)"> Strict button mode</label>
-        <button id="debugAuditBtn" class="secondary" onclick="runButtonAudit(this)">Run Button Audit</button>
-      </div>
-      <div class="history-panel">
-        <h3>Design History</h3>
-        <div class="history-actions">
-          <button id="historyUndoBtn" class="secondary">Undo Design</button>
-          <button id="historyRedoBtn" class="secondary">Redo Design</button>
+      </details>
+      <details class="control-group">
+        <summary>Debug / Health</summary>
+        <div class="control-body">
+          <div class="debug-panel">
+            <table><tbody id="debugHealth"></tbody></table>
+            <label><input id="strictModeToggle" type="checkbox" onchange="setStrictMode(this.checked)"> Strict button mode</label>
+            <button id="debugAuditBtn" class="secondary" onclick="runButtonAudit(this)">Run Button Audit</button>
+          </div>
         </div>
-        <table class="history-table"><tbody id="historyRows"></tbody></table>
-      </div>
+      </details>
+      <details class="control-group">
+        <summary>Design History</summary>
+        <div class="control-body">
+          <div class="history-panel">
+            <div class="history-actions">
+              <button id="historyUndoBtn" class="secondary">Undo Design</button>
+              <button id="historyRedoBtn" class="secondary">Redo Design</button>
+            </div>
+            <table class="history-table"><tbody id="historyRows"></tbody></table>
+          </div>
+        </div>
+      </details>
       <p><a href="/docs">Developer API tester</a></p>
     </section>
     <section class="workspace">
@@ -916,6 +956,13 @@ def home() -> str:
           <div class="card"><span>CPM Error</span><strong id="error">-</strong></div>
           <div class="card"><span>Mass</span><strong id="mass">-</strong></div>
           <div class="card"><span>Torsion</span><strong id="torsion">-</strong></div>
+        </div>
+        <div id="guidanceCard" class="guidance-card">
+          <div>
+            <span>Next Move</span>
+            <strong id="guidanceTitle">Run baseline</strong>
+          </div>
+          <p id="guidanceText">The default model will run on startup. Adjust CPM, head weight, material, or wrap angle, then analyze again.</p>
         </div>
         <div class="grid2">
           <div>
@@ -2330,6 +2377,7 @@ def home() -> str:
         latest = engineeringWithTape(await res.json());
       } catch (error) {
         writeCadConsole(error.message || String(error));
+        setAppStatus(`Analysis failed: ${error.message || String(error)}`, true);
         return;
       }
 
@@ -2337,6 +2385,7 @@ def home() -> str:
       document.getElementById('error').textContent = latest.cpm_error.toFixed(1);
       document.getElementById('mass').textContent = latest.mass_g.toFixed(1) + ' g';
       document.getElementById('torsion').textContent = latest.torsion_deflection_deg_15nm.toFixed(1) + ' deg';
+      updateGuidanceCard(latest);
 
       document.getElementById('zones').innerHTML = latest.zone_profile.map(
         z => `<tr><td>${z.station_in}"</td><td>${z.cpm.toFixed(1)} <small>+${(z.tape_boost || 0).toFixed(1)}</small></td></tr>`
@@ -2382,6 +2431,37 @@ def home() -> str:
       drawCad3d();
       updateValidationReadout();
       writeCadConsole('Analysis complete. CadQuery STEP recipe ready for export.');
+    }
+
+    function updateGuidanceCard(data) {
+      const card = document.getElementById('guidanceCard');
+      const title = document.getElementById('guidanceTitle');
+      const text = document.getElementById('guidanceText');
+      if (!card || !title || !text || !data) return;
+
+      const error = Number(data.cpm_error || 0);
+      const absError = Math.abs(error);
+      card.classList.remove('warn', 'bad');
+
+      if (absError <= 3) {
+        title.textContent = 'Target matched';
+        text.textContent = `Overall CPM is within ${absError.toFixed(1)} CPM of target. Move to CAD Workspace or export the build data.`;
+        return;
+      }
+
+      if (absError <= 8) {
+        card.classList.add('warn');
+      } else {
+        card.classList.add('bad');
+      }
+
+      if (error > 0) {
+        title.textContent = 'Model is too stiff';
+        text.textContent = `The shaft is ${absError.toFixed(1)} CPM over target. Try a lower wrap angle, softer material, or less local reinforcement.`;
+      } else {
+        title.textContent = 'Model is too soft';
+        text.textContent = `The shaft is ${absError.toFixed(1)} CPM under target. Try a higher wrap angle, stiffer material, or added tip/mid reinforcement.`;
+      }
     }
 
     function drawChart(profile) {
