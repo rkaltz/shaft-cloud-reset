@@ -246,16 +246,17 @@ def zone_profile(segments: list[Segment], material: Material, calibration: CpmCa
     rows = []
     for station in ZONE_STATIONS_IN:
         effective_span = max(1.0, station - clamp)
-        raw_cpm = calibration.zone_k * sqrt(
+        formula_cpm = calibration.zone_k * sqrt(
             ei / ((calibration.profile_weight_g / 1000.0) * (effective_span * 0.0254) ** 3)
         )
+        cpm = auditor_cpm_reading(formula_cpm)
         rows.append(
             {
                 "station_in": float(station),
                 "effective_span_in": effective_span,
-                "cpm": auditor_cpm_reading(raw_cpm),
-                "raw_model_cpm": raw_cpm,
-                "analyzer_limited": raw_cpm > AUDITOR_CPM_MAX or raw_cpm < AUDITOR_CPM_MIN,
+                "cpm": cpm,
+                "raw_model_cpm": cpm,
+                "analyzer_limited": formula_cpm > AUDITOR_CPM_MAX or formula_cpm < AUDITOR_CPM_MIN,
                 "analyzer_range": f"{AUDITOR_CPM_MIN:.0f}-{AUDITOR_CPM_MAX:.0f}",
             }
         )
@@ -2948,7 +2949,7 @@ def home() -> str:
       const raw = Number(zone.raw_model_cpm ?? zone.raw_cpm ?? cpm);
       const limited = Boolean(zone.analyzer_limited) || raw > 999 || raw < 0;
       const boostText = boost ? ` <small>+${boost.toFixed(1)}</small>` : '';
-      const limitText = limited ? ` <small>limited ${raw.toFixed(1)}</small>` : '';
+      const limitText = limited ? ` <small>at analyzer limit</small>` : '';
       return `${cpm.toFixed(1)}${boostText}${limitText}`;
     }
 
@@ -4419,15 +4420,16 @@ ${y2.toFixed(3)}
     function tapeAdjustedZoneProfile(baseProfile) {
       return baseProfile.map(zone => {
         const localBoost = tapeStiffnessIndexAtStation(Number(zone.station_in));
-        const rawBase = Number(zone.raw_model_cpm ?? zone.raw_cpm ?? zone.cpm);
-        const rawAdjusted = rawBase + localBoost;
+        const baseReading = auditorCpmReading(Number(zone.cpm));
+        const unclampedAdjusted = baseReading + localBoost;
+        const adjustedReading = auditorCpmReading(unclampedAdjusted);
         return {
           ...zone,
           base_cpm: zone.cpm,
-          raw_model_cpm: rawAdjusted,
+          raw_model_cpm: adjustedReading,
           tape_boost: localBoost,
-          cpm: auditorCpmReading(rawAdjusted),
-          analyzer_limited: Boolean(zone.analyzer_limited) || rawAdjusted > 999 || rawAdjusted < 0
+          cpm: adjustedReading,
+          analyzer_limited: Boolean(zone.analyzer_limited) || unclampedAdjusted > 999 || unclampedAdjusted < 0
         };
       });
     }
