@@ -20,6 +20,12 @@ def require(condition: bool, message: str) -> None:
 def main_check() -> None:
     html = main.home()
     require("AI Shaft Builder Brief" in html, "Fit-to-build UI is missing")
+    require("Shaft Data" in html, "Shaft data tab is missing")
+    require("Auditor Frequency Analyzer" in html, "Auditor shaft data page is missing")
+    require("shaftCpm41" in html, "41-inch Auditor CPM input is missing")
+    require("shaftCpm11" in html, "11-inch Auditor CPM input is missing")
+    require("analyzeShaftData" in html, "Shaft data analyzer logic is missing")
+    require("Use Butt CPM as Target" in html, "Measured shaft target transfer is missing")
     require("Camera Fit" in html, "Camera fitting tab is missing")
     require("Pre-Fit Interview" in html, "Pre-fit interview form is missing")
     require("Camera 1 - Face On" in html, "Face-on camera lane is missing")

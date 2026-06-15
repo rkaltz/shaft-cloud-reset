@@ -2060,6 +2060,13 @@ def home() -> str:
     .export-row { display: grid; grid-template-columns: 1fr 90px; gap: 8px; margin-top: 8px; }
     .fit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
     .fit-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+    .shaft-data-grid { display: grid; grid-template-columns: minmax(320px, 0.75fr) minmax(520px, 1.25fr); gap: 14px; align-items: start; }
+    .shaft-data-card { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 8px; padding: 12px; }
+    .shaft-data-card h3 { margin-top: 0; }
+    .auditor-table input { margin: 0; padding: 8px; }
+    .auditor-table td, .auditor-table th { vertical-align: top; }
+    .auditor-readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+    .auditor-readout .card { background: #eef5f3; border: 1px solid #cbd8d5; }
     .fit-builder-brief { border: 1px solid #cbd8d5; background: #f9fbfa; border-radius: 6px; padding: 12px; margin: 12px 0; }
     .fit-builder-brief h3 { margin-top: 0; }
     .camera-fit-layout { display: grid; grid-template-columns: minmax(360px, 1.2fr) minmax(320px, 0.8fr); gap: 14px; align-items: start; }
@@ -2171,7 +2178,7 @@ def home() -> str:
       .cad-drawing-canvas { min-height: 520px; height: 64vh; }
       .cad-right-panel { max-height: none; }
     }
-    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid, .camera-fit-layout, .camera-feed-grid, .camera-section-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
+    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid, .shaft-data-grid, .camera-fit-layout, .camera-feed-grid, .camera-section-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
     @media (max-width: 560px) { header { align-items: flex-start; flex-direction: column; } .metrics, .mini-grid, .primary-actions .secondary-row { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -2335,6 +2342,7 @@ def home() -> str:
         <div class="workspace-title">AE ShaftCAD Workbench</div>
         <div class="tabs">
           <button class="tab active" id="simTab" onclick="showView('simulation')">Simulation</button>
+          <button class="tab" id="shaftDataTab" onclick="showView('shaftData')">Shaft Data</button>
           <button class="tab" id="cameraTab" onclick="showView('camera')">Camera Fit</button>
           <button class="tab" id="fitTab" onclick="showView('fit')">Fit-to-Build</button>
           <button class="tab" id="drawTab" onclick="showView('cad3d')">CAD Workspace</button>
@@ -2402,6 +2410,62 @@ def home() -> str:
         <pre id="library"></pre>
         <h3>Mandrel / Taper G-Code</h3>
         <pre id="gcode"></pre>
+      </div>
+      <div id="shaftDataView" class="view hidden">
+        <div class="cad-strip">
+          <div class="cad-chip">Source<strong>Auditor Frequency Analyzer</strong></div>
+          <div class="cad-chip">Stations<strong>41 / 36 / 31 / 26 / 21 / 16 / 11</strong></div>
+          <div class="cad-chip">Range<strong>0-999 CPM</strong></div>
+          <div class="cad-chip">Status<strong id="shaftDataState">No profile loaded</strong></div>
+        </div>
+        <div class="shaft-data-grid">
+          <div class="shaft-data-card">
+            <h3>Shaft Identity</h3>
+            <div class="mini-grid">
+              <div><label>Manufacturer</label><input id="shaftDataMaker" type="text" value=""></div>
+              <div><label>Model</label><input id="shaftDataModel" type="text" value=""></div>
+              <div><label>Flex Label</label><input id="shaftDataFlex" type="text" value=""></div>
+              <div><label>Raw Length (in)</label><input id="shaftDataRawLength" type="number" value="46" step="0.25"></div>
+              <div><label>Weight (g)</label><input id="shaftDataWeight" type="number" value="65" step="0.1"></div>
+              <div><label>Torque (deg)</label><input id="shaftDataTorque" type="number" value="3.5" step="0.1"></div>
+              <div><label>Tip OD (in)</label><input id="shaftDataTipOd" type="number" value="0.335" step="0.001"></div>
+              <div><label>Butt OD (in)</label><input id="shaftDataButtOd" type="number" value="0.600" step="0.001"></div>
+              <div><label>Balance Point (in)</label><input id="shaftDataBalance" type="number" value="0" step="0.1"></div>
+              <div><label>Trim State</label><select id="shaftDataTrimState"><option selected>raw uncut</option><option>butt trimmed</option><option>tip trimmed</option><option>installed pull</option></select></div>
+            </div>
+            <label>Profile Notes</label>
+            <textarea id="shaftDataNotes" rows="5" style="width:100%; box-sizing:border-box; margin-top:5px; border:1px solid #b9c8c4; border-radius:6px; padding:10px;"></textarea>
+            <div class="fit-actions">
+              <button id="shaftDataAnalyzeBtn">Analyze Shaft Data</button>
+              <button id="shaftDataImportBtn" class="secondary">Import Current Model</button>
+              <button id="shaftDataApplyBtn" class="secondary">Use Butt CPM as Target</button>
+            </div>
+          </div>
+          <div class="shaft-data-card">
+            <h3>Auditor Frequency Analyzer Input</h3>
+            <table class="auditor-table">
+              <thead><tr><th>Station</th><th>Measured CPM</th><th>Section Read</th><th>Range Rule</th></tr></thead>
+              <tbody id="shaftDataRows">
+                <tr><td>41"</td><td><input id="shaftCpm41" data-station="41" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead41">-</td><td>Butt: 1 flex ~= 10 CPM</td></tr>
+                <tr><td>36"</td><td><input id="shaftCpm36" data-station="36" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead36">-</td><td>Butt: 1 flex ~= 10 CPM</td></tr>
+                <tr><td>31"</td><td><input id="shaftCpm31" data-station="31" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead31">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
+                <tr><td>26"</td><td><input id="shaftCpm26" data-station="26" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead26">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
+                <tr><td>21"</td><td><input id="shaftCpm21" data-station="21" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead21">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
+                <tr><td>16"</td><td><input id="shaftCpm16" data-station="16" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead16">-</td><td>Tip: 1 flex ~= 40+ CPM</td></tr>
+                <tr><td>11"</td><td><input id="shaftCpm11" data-station="11" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead11">-</td><td>Tip: 1 flex ~= 40+ CPM; Auditor display capped at 999</td></tr>
+              </tbody>
+            </table>
+            <div class="auditor-readout">
+              <div class="card"><span>Butt Avg</span><strong id="shaftButtAvg">-</strong></div>
+              <div class="card"><span>Mid Avg</span><strong id="shaftMidAvg">-</strong></div>
+              <div class="card"><span>Tip Avg</span><strong id="shaftTipAvg">-</strong></div>
+            </div>
+            <h3>Profile Read</h3>
+            <ul id="shaftDataFindings"><li>Enter Auditor CPM values, then analyze.</li></ul>
+            <h3>Captured Shaft Packet</h3>
+            <pre id="shaftDataPacket">No shaft data packet yet.</pre>
+          </div>
+        </div>
       </div>
       <div id="cameraView" class="view hidden">
         <div class="cad-strip">
@@ -3050,6 +3114,7 @@ def home() -> str:
     let sketchTool = 'select';
     let latestFitProfile = null;
     let fitCadBridge = null;
+    let latestShaftDataProfile = null;
     let cameraStream = null;
     let cameraStreams = {face: null, downLine: null};
     let cameraMotionSamples = [];
@@ -3072,7 +3137,7 @@ def home() -> str:
       strictMode: true
     };
     const APP_MODE = new URLSearchParams(window.location.search).get('mode') === 'viewer' ? 'viewer' : 'edit';
-    const VIEWER_ALLOWED_BUTTON_IDS = new Set(['simTab', 'fitTab', 'drawTab', 'flagTab', 'tapeTab', 'stackTab', 'cad3dTab']);
+    const VIEWER_ALLOWED_BUTTON_IDS = new Set(['simTab', 'shaftDataTab', 'fitTab', 'drawTab', 'flagTab', 'tapeTab', 'stackTab', 'cad3dTab']);
     const ARCHITECTURES = {
       flag_wrap: {
         name: 'Flag wrap',
@@ -3910,6 +3975,7 @@ def home() -> str:
       if (viewName === 'drawing') viewName = 'cad3d';
       document.body.classList.toggle('camera-focus', viewName === 'camera');
       const simulation = document.getElementById('simulationView');
+      const shaftDataView = document.getElementById('shaftDataView');
       const cameraView = document.getElementById('cameraView');
       const fitView = document.getElementById('fitView');
       const drawing = document.getElementById('drawingView');
@@ -3918,6 +3984,7 @@ def home() -> str:
       const stackView = document.getElementById('stackView');
       const cad3dView = document.getElementById('cad3dView');
       const simTab = document.getElementById('simTab');
+      const shaftDataTab = document.getElementById('shaftDataTab');
       const cameraTab = document.getElementById('cameraTab');
       const fitTab = document.getElementById('fitTab');
       const drawTab = document.getElementById('drawTab');
@@ -3926,6 +3993,7 @@ def home() -> str:
       const stackTab = document.getElementById('stackTab');
       const cad3dTab = document.getElementById('cad3dTab');
       simulation.classList.toggle('hidden', viewName !== 'simulation');
+      shaftDataView.classList.toggle('hidden', viewName !== 'shaftData');
       cameraView.classList.toggle('hidden', viewName !== 'camera');
       fitView.classList.toggle('hidden', viewName !== 'fit');
       drawing.classList.toggle('hidden', viewName !== 'drawing');
@@ -3934,6 +4002,7 @@ def home() -> str:
       stackView.classList.toggle('hidden', viewName !== 'stack');
       cad3dView.classList.toggle('hidden', viewName !== 'cad3d');
       simTab.classList.toggle('active', viewName === 'simulation');
+      shaftDataTab.classList.toggle('active', viewName === 'shaftData');
       cameraTab.classList.toggle('active', viewName === 'camera');
       fitTab.classList.toggle('active', viewName === 'fit');
       drawTab.classList.toggle('active', viewName === 'cad3d');
@@ -3941,6 +4010,7 @@ def home() -> str:
       tapeTab.classList.toggle('active', viewName === 'tape');
       stackTab.classList.toggle('active', viewName === 'stack');
       cad3dTab.classList.toggle('active', false);
+      if (viewName === 'shaftData') renderShaftDataProfile();
       if (viewName === 'camera') renderCameraFitResult();
       if (viewName === 'fit') renderFitBridge();
       if (viewName === 'flags') renderFlagEditor();
@@ -4250,6 +4320,145 @@ def home() -> str:
       const fullFlexText = flexDelta ? `1 flex = ${flexDelta.toFixed(0)} CPM` : '';
       const rangeText = [rangeLabel, fullFlexText].filter(Boolean).join('; ');
       return `${cpm.toFixed(1)}${boostText}${limitText}<br><small>${escapeFitText(rangeText)}</small>`;
+    }
+
+    function shaftDataNumber(id, fallback = null) {
+      const value = Number(document.getElementById(id)?.value);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function shaftDataStationRows() {
+      return [41, 36, 31, 26, 21, 16, 11].map(station => {
+        const rawValue = document.getElementById(`shaftCpm${station}`)?.value;
+        const hasValue = rawValue !== '' && rawValue != null;
+        const cpm = hasValue ? auditorCpmReading(Number(rawValue)) : null;
+        const section = cpmSectionForStation(station);
+        const reference = CPM_SECTION_RANGES[section] || {};
+        return {
+          station_in: station,
+          cpm,
+          section,
+          cpm_class: cpm == null ? 'missing' : cpmRangeLabel(section, cpm),
+          full_flex_delta_cpm: Number(reference.fullFlex || 0),
+          analyzer_range: '0-999',
+          analyzer_limited: hasValue && Number(rawValue) > 999
+        };
+      });
+    }
+
+    function avgPresent(values) {
+      const present = values.filter(value => Number.isFinite(value));
+      return present.length ? present.reduce((sum, value) => sum + value, 0) / present.length : null;
+    }
+
+    function renderShaftDataProfile() {
+      const profile = latestShaftDataProfile;
+      const findingsEl = document.getElementById('shaftDataFindings');
+      const packetEl = document.getElementById('shaftDataPacket');
+      const stateEl = document.getElementById('shaftDataState');
+      const buttAvgEl = document.getElementById('shaftButtAvg');
+      const midAvgEl = document.getElementById('shaftMidAvg');
+      const tipAvgEl = document.getElementById('shaftTipAvg');
+      [41, 36, 31, 26, 21, 16, 11].forEach(station => {
+        const row = profile?.stations?.find(item => item.station_in === station);
+        const readEl = document.getElementById(`shaftRead${station}`);
+        if (readEl) readEl.textContent = row && row.cpm != null ? `${row.section} ${row.cpm_class} (${row.cpm.toFixed(1)} CPM)` : '-';
+      });
+      if (!profile) {
+        if (findingsEl) findingsEl.innerHTML = '<li>Enter Auditor CPM values, then analyze.</li>';
+        if (packetEl) packetEl.textContent = 'No shaft data packet yet.';
+        if (stateEl) stateEl.textContent = 'No profile loaded';
+        if (buttAvgEl) buttAvgEl.textContent = '-';
+        if (midAvgEl) midAvgEl.textContent = '-';
+        if (tipAvgEl) tipAvgEl.textContent = '-';
+        return;
+      }
+      if (stateEl) stateEl.textContent = profile.complete ? 'Profile captured' : 'Incomplete profile';
+      if (buttAvgEl) buttAvgEl.textContent = profile.section_averages.butt == null ? '-' : `${profile.section_averages.butt.toFixed(1)} CPM`;
+      if (midAvgEl) midAvgEl.textContent = profile.section_averages.mid == null ? '-' : `${profile.section_averages.mid.toFixed(1)} CPM`;
+      if (tipAvgEl) tipAvgEl.textContent = profile.section_averages.tip == null ? '-' : `${profile.section_averages.tip.toFixed(1)} CPM`;
+      if (findingsEl) findingsEl.innerHTML = profile.findings.map(item => `<li>${escapeFitText(item)}</li>`).join('');
+      if (packetEl) packetEl.textContent = JSON.stringify(profile, null, 2);
+    }
+
+    function analyzeShaftData(button) {
+      flashButton(button, 'Analyzed');
+      const stations = shaftDataStationRows();
+      const missing = stations.filter(row => row.cpm == null).map(row => `${row.station_in}"`);
+      const buttAvg = avgPresent(stations.filter(row => row.section === 'Butt').map(row => row.cpm));
+      const midAvg = avgPresent(stations.filter(row => row.section === 'Mid').map(row => row.cpm));
+      const tipAvg = avgPresent(stations.filter(row => row.section === 'Tip').map(row => row.cpm));
+      const first = stations.find(row => row.cpm != null);
+      const last = [...stations].reverse().find(row => row.cpm != null);
+      const gradient = first && last ? last.cpm - first.cpm : null;
+      const findings = [];
+      if (missing.length) findings.push(`Missing Auditor readings at ${missing.join(', ')}.`);
+      findings.push('Auditor range is 0-999 CPM; values above 999 should be treated as capped instrument readings, not real CPM values.');
+      if (buttAvg != null) findings.push(`Butt section average is ${buttAvg.toFixed(1)} CPM; butt flex deltas are roughly 10 CPM per full flex.`);
+      if (midAvg != null) findings.push(`Mid section average is ${midAvg.toFixed(1)} CPM; mid flex deltas are roughly 25 CPM per full flex.`);
+      if (tipAvg != null) findings.push(`Tip section average is ${tipAvg.toFixed(1)} CPM; tip flex deltas are roughly 40+ CPM per full flex.`);
+      if (gradient != null) findings.push(`Measured profile gradient from ${first.station_in}" to ${last.station_in}" is ${gradient.toFixed(1)} CPM.`);
+      const capped = stations.filter(row => row.analyzer_limited);
+      if (capped.length) findings.push(`Capped stations: ${capped.map(row => `${row.station_in}"`).join(', ')}. Recheck entry because the Auditor should display 0-999 only.`);
+      const usable = stations.filter(row => row.cpm != null).length >= 4;
+      if (usable && !missing.length) findings.push('Complete 7-station profile is ready for comparison, fitting, and shaft database storage.');
+      else if (usable) findings.push('Partial profile is usable for direction, but not enough to lock a design.');
+      else findings.push('Not enough measured data yet. Enter at least butt, mid, and tip readings.');
+
+      latestShaftDataProfile = {
+        captured_at: new Date().toISOString(),
+        source: 'Auditor frequency analyzer',
+        identity: {
+          manufacturer: document.getElementById('shaftDataMaker')?.value || '',
+          model: document.getElementById('shaftDataModel')?.value || '',
+          flex_label: document.getElementById('shaftDataFlex')?.value || '',
+          raw_length_in: shaftDataNumber('shaftDataRawLength', null),
+          weight_g: shaftDataNumber('shaftDataWeight', null),
+          torque_deg: shaftDataNumber('shaftDataTorque', null),
+          tip_od_in: shaftDataNumber('shaftDataTipOd', null),
+          butt_od_in: shaftDataNumber('shaftDataButtOd', null),
+          balance_point_in: shaftDataNumber('shaftDataBalance', null),
+          trim_state: document.getElementById('shaftDataTrimState')?.value || '',
+          notes: document.getElementById('shaftDataNotes')?.value || ''
+        },
+        stations,
+        section_averages: {butt: buttAvg, mid: midAvg, tip: tipAvg},
+        profile_gradient_cpm: gradient,
+        complete: !missing.length,
+        findings
+      };
+      renderShaftDataProfile();
+      setAppStatus('Shaft data profile analyzed.');
+      return latestShaftDataProfile;
+    }
+
+    async function importCurrentModelToShaftData(button) {
+      if (!latest) await run();
+      flashButton(button, 'Imported');
+      const profile = latest?.zone_profile || [];
+      profile.forEach(zone => {
+        const station = Math.round(Number(zone.station_in || 0));
+        const input = document.getElementById(`shaftCpm${station}`);
+        if (input) input.value = auditorCpmReading(Number(zone.cpm || 0)).toFixed(1);
+      });
+      if (latest?.overall_cpm && document.getElementById('shaftCpm41')) {
+        document.getElementById('shaftCpm41').value = auditorCpmReading(latest.overall_cpm).toFixed(1);
+      }
+      analyzeShaftData();
+      setAppStatus('Current simulated CPM profile imported into Shaft Data.');
+    }
+
+    function applyShaftDataTarget(button) {
+      if (!latestShaftDataProfile) analyzeShaftData();
+      const butt = latestShaftDataProfile?.section_averages?.butt;
+      if (butt == null) {
+        setAppStatus('Enter butt section CPM before applying a target.', true);
+        return;
+      }
+      flashButton(button, 'Applied');
+      document.getElementById('target').value = butt.toFixed(1);
+      run();
+      setAppStatus(`Target CPM set from measured butt average: ${butt.toFixed(1)}.`);
     }
 
     function fitMultiplier(value, mapping) {
@@ -8368,6 +8577,7 @@ method = "${document.getElementById('method').value}"`
     function buttonRoutes() {
       return {
         simTab: () => showView('simulation'),
+        shaftDataTab: () => showView('shaftData'),
         cameraTab: () => showView('camera'),
         fitTab: () => showView('fit'),
         drawTab: () => showView('drawing'),
@@ -8387,6 +8597,9 @@ method = "${document.getElementById('method').value}"`
         materialDeleteBtn: button => deleteSelectedMaterial(button),
         materialExportBtn: button => exportMaterials(button),
         materialImportBtn: () => document.getElementById('materialFile')?.click(),
+        shaftDataAnalyzeBtn: button => analyzeShaftData(button),
+        shaftDataImportBtn: button => importCurrentModelToShaftData(button),
+        shaftDataApplyBtn: button => applyShaftDataTarget(button),
         cameraStartBtn: button => startCameraFit(button),
         cameraCaptureBtn: button => startCameraSwingCapture(button),
         cameraAiReviewBtn: button => aiReviewCapturedSwings(button),
@@ -8544,6 +8757,9 @@ method = "${document.getElementById('method').value}"`
     window.setSketchTool = setSketchTool;
     window.handleSketchMenu = handleSketchMenu;
     window.run = run;
+    window.analyzeShaftData = analyzeShaftData;
+    window.importCurrentModelToShaftData = importCurrentModelToShaftData;
+    window.applyShaftDataTarget = applyShaftDataTarget;
     window.startCameraFit = startCameraFit;
     window.startCameraSwingCapture = startCameraSwingCapture;
     window.aiReviewCapturedSwings = aiReviewCapturedSwings;
