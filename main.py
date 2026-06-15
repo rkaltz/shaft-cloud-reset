@@ -881,6 +881,76 @@ def diy_driver_tuneup(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def visual_fitting_read(payload: dict[str, Any]) -> dict[str, Any]:
+    """Use visual-fitting observations to detect player/shaft chemistry problems."""
+
+    tempo_control = str(payload.get("visual_tempo_control", "unknown") or "unknown").lower()
+    rhythm_float = str(payload.get("visual_rhythm_float", "unknown") or "unknown").lower()
+    transition_move = str(payload.get("visual_transition_move", "unknown") or "unknown").lower()
+    player_commitment = str(payload.get("visual_commitment", "unknown") or "unknown").lower()
+    one_arm_shoulder = str(payload.get("visual_one_arm_shoulder", "unknown") or "unknown").lower()
+    power_leaks = str(payload.get("visual_power_leaks", "unknown") or "unknown").lower()
+
+    diagnosis: list[str] = []
+    fitting_moves: list[str] = []
+    shaft_design_bias: list[str] = []
+    warnings: list[str] = []
+
+    if tempo_control in {"inconsistent", "slow/insecure", "slow", "loose"} or rhythm_float in {"no float", "loose", "insecure"}:
+        diagnosis.append("Tempo/rhythm looks insecure; the player may not trust the club or shaft load.")
+        fitting_moves.append("Test more shaft weight or a stronger butt/mid section before assuming the player needs lighter.")
+        shaft_design_bias.append("Add handle/mid feedback and resistance without immediately over-stiffening the tip.")
+
+    if transition_move in {"jump start", "hips slide", "back and hips", "struggle"}:
+        diagnosis.append("Player appears to jump-start transition, which often points to too much total weight or too stiff a handle/mid profile.")
+        fitting_moves.append("Back down total/shaft weight a few grams and retest transition before changing launch profile.")
+        shaft_design_bias.append("Reduce total-weight target or soften handle/mid load response while preserving face control.")
+
+    if one_arm_shoulder in {"drop", "drops", "can't hold", "too heavy"}:
+        diagnosis.append("One-arm shoulder drop suggests the total weight is above the player's useful upper limit.")
+        fitting_moves.append("Lower shaft/total weight and retest until the left shoulder can control the club through the bottom.")
+        shaft_design_bias.append("Cap the shaft weight recommendation and avoid adding mass to solve feel.")
+
+    if player_commitment in {"kill ball", "overplay", "aggressive", "sparks"} or power_leaks in {"multiple bursts", "sparks", "leaking", "staged"}:
+        diagnosis.append("Player is overplaying the club and leaking power in stages.")
+        fitting_moves.append("Check whether butt/mid/tip are too stiff or feedback is too harsh, then reduce the trigger that makes him fight the shaft.")
+        shaft_design_bias.append("Use smoother load feedback or damping; do not chase lower launch by making the tip brutally stiff.")
+
+    if player_commitment in {"weak", "timid", "not committed"}:
+        diagnosis.append("Player looks under-committed; this can be a club that is too light/weak, not necessarily a weak player.")
+        fitting_moves.append("Test added shaft weight or MOI/resistance to see whether speed and commitment wake up.")
+        shaft_design_bias.append("Raise weight/resistance trial before recommending a lighter shaft.")
+
+    if not diagnosis:
+        diagnosis.append("No obvious visual-fit conflict recorded. Use impact marks and launch data as the main proof.")
+        fitting_moves.append("Keep the current shaft direction and change one variable at a time.")
+        shaft_design_bias.append("Neutral visual fit: preserve feel while validating CPM, torque, launch, and dispersion.")
+
+    warnings.extend(
+        [
+            "Shaft labels are not enough; a high-launch or low-launch label can produce the opposite result if it changes the player's motion.",
+            "Use loft/head/ball to tune ball flight when possible; do not force the shaft to solve every flight problem and ruin feel.",
+            "The right shaft is the player's dancing partner: trust visible rhythm, balance, and contact proof over catalog claims.",
+        ]
+    )
+
+    return {
+        "observations": {
+            "tempo_control": tempo_control,
+            "rhythm_float": rhythm_float,
+            "transition_move": transition_move,
+            "player_commitment": player_commitment,
+            "one_arm_shoulder": one_arm_shoulder,
+            "power_leaks": power_leaks,
+        },
+        "diagnosis": diagnosis,
+        "fitting_moves": fitting_moves,
+        "shaft_design_bias": shaft_design_bias,
+        "warnings": warnings,
+        "boundary": "Visual fitting is a directional read. Confirm with impact marks, launch monitor data, and player feedback.",
+    }
+
+
 def manufacturing_zones(fit: dict[str, Any], swing: dict[str, Any]) -> list[dict[str, Any]]:
     transition = fit["inputs"]["transition"]
     release = fit["inputs"]["release"]
@@ -994,6 +1064,7 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     fit["shaft_database_matches"] = shaft_reference_matches(speed_mph, tempo, transition, miss)
     fit["diy_driver_tuneup"] = diy_driver_tuneup(payload)
+    fit["visual_fitting"] = visual_fitting_read(payload)
     return fit
 
 
@@ -1958,6 +2029,12 @@ def home() -> str:
               <div><label>Gripped Down Test</label><input id="cameraGrippedDown" type="number" value="0" step="0.25"></div>
               <div><label>PW Shaft Weight (g)</label><input id="cameraPwWeight" type="number" value="120" step="1"></div>
               <div><label>Added Head Weight (g)</label><input id="cameraAddedHeadWeight" type="number" value="0" step="0.5"></div>
+              <div><label>Tempo Control</label><select id="cameraVisualTempo"><option selected>unknown</option><option>controlled</option><option>inconsistent</option><option>slow/insecure</option></select></div>
+              <div><label>Rhythm / Float</label><select id="cameraVisualRhythm"><option selected>unknown</option><option>good float</option><option>no float</option><option>loose</option></select></div>
+              <div><label>Transition Look</label><select id="cameraVisualTransition"><option selected>unknown</option><option>clean rotation</option><option>jump start</option><option>hips slide</option><option>struggle</option></select></div>
+              <div><label>Player Commitment</label><select id="cameraVisualCommitment"><option selected>unknown</option><option>confident</option><option>weak</option><option>overplay</option><option>kill ball</option></select></div>
+              <div><label>One-Arm Shoulder Test</label><select id="cameraVisualShoulder"><option selected>unknown</option><option>stable</option><option>drop</option><option>too heavy</option></select></div>
+              <div><label>Power Leaks</label><select id="cameraVisualLeaks"><option selected>unknown</option><option>none</option><option>multiple bursts</option><option>sparks</option><option>leaking</option></select></div>
               <div><label>Launch (deg)</label><input id="cameraLaunch" type="number" value="13.5" step="0.1"></div>
               <div><label>Spin (rpm)</label><input id="cameraSpin" type="number" value="2650" step="10"></div>
               <div><label>Target Weight (g)</label><input id="cameraWeight" type="number" value="65" step="1"></div>
@@ -1985,6 +2062,10 @@ def home() -> str:
               <div class="camera-section-card camera-wide-card">
                 <h4>DIY Driver Tune-Up</h4>
                 <ul id="cameraTuneupList"><li>No tune-up plan yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>Visual Fitting Read</h4>
+                <ul id="cameraVisualList"><li>No visual fitting read yet.</li></ul>
               </div>
               <div class="camera-section-card camera-wide-card">
                 <h4>Starter Shaft Database Matches</h4>
@@ -3666,6 +3747,12 @@ def home() -> str:
         gripped_down_in: cameraNumber('cameraGrippedDown', 0),
         pw_shaft_weight_g: cameraNumber('cameraPwWeight', 120),
         added_head_weight_g: cameraNumber('cameraAddedHeadWeight', 0),
+        visual_tempo_control: document.getElementById('cameraVisualTempo')?.value || 'unknown',
+        visual_rhythm_float: document.getElementById('cameraVisualRhythm')?.value || 'unknown',
+        visual_transition_move: document.getElementById('cameraVisualTransition')?.value || 'unknown',
+        visual_commitment: document.getElementById('cameraVisualCommitment')?.value || 'unknown',
+        visual_one_arm_shoulder: document.getElementById('cameraVisualShoulder')?.value || 'unknown',
+        visual_power_leaks: document.getElementById('cameraVisualLeaks')?.value || 'unknown',
         launch_deg: cameraNumber('cameraLaunch', 13.5),
         spin_rpm: cameraNumber('cameraSpin', 2650),
         weight_g: cameraNumber('cameraWeight', 65),
@@ -3707,6 +3794,7 @@ def home() -> str:
 
     function enrichCameraFitProfile(profile, payload, inputs) {
       const diyTuneup = buildDiyDriverTuneup(payload);
+      const visualFit = buildVisualFittingRead(payload);
       const why = [
         `${Number(payload.speed_mph).toFixed(0)} mph speed sets the base stiffness and weight class.`,
         `${inputs.tempo} tempo with ${inputs.transition} transition drives the handle/mid stability target.`,
@@ -3752,7 +3840,61 @@ def home() -> str:
       ];
       profile.shaft_database_matches = cameraReferenceMatches(payload, inputs);
       profile.diy_driver_tuneup = diyTuneup;
+      profile.visual_fitting = visualFit;
       return profile;
+    }
+
+    function buildVisualFittingRead(payload) {
+      const tempo = String(payload.visual_tempo_control || 'unknown').toLowerCase();
+      const rhythm = String(payload.visual_rhythm_float || 'unknown').toLowerCase();
+      const transition = String(payload.visual_transition_move || 'unknown').toLowerCase();
+      const commitment = String(payload.visual_commitment || 'unknown').toLowerCase();
+      const shoulder = String(payload.visual_one_arm_shoulder || 'unknown').toLowerCase();
+      const leaks = String(payload.visual_power_leaks || 'unknown').toLowerCase();
+      const diagnosis = [];
+      const fittingMoves = [];
+      const shaftBias = [];
+
+      if (tempo === 'inconsistent' || tempo === 'slow/insecure' || rhythm === 'no float' || rhythm === 'loose') {
+        diagnosis.push('Tempo/rhythm looks insecure; the player may not trust the club or shaft load.');
+        fittingMoves.push('Test more shaft weight or a stronger butt/mid section before assuming the player needs lighter.');
+        shaftBias.push('Add handle/mid feedback and resistance without immediately over-stiffening the tip.');
+      }
+      if (transition === 'jump start' || transition === 'hips slide' || transition === 'struggle') {
+        diagnosis.push('Player appears to jump-start transition, often pointing to too much total weight or too stiff a handle/mid profile.');
+        fittingMoves.push('Back down total/shaft weight a few grams and retest transition before changing launch profile.');
+        shaftBias.push('Reduce total-weight target or soften handle/mid load response while preserving face control.');
+      }
+      if (shoulder === 'drop' || shoulder === 'too heavy') {
+        diagnosis.push('One-arm shoulder drop suggests total weight is above the player useful upper limit.');
+        fittingMoves.push('Lower shaft/total weight and retest until the shoulder can control the club through the bottom.');
+        shaftBias.push('Cap shaft weight recommendation and avoid adding mass to solve feel.');
+      }
+      if (commitment === 'kill ball' || commitment === 'overplay' || leaks === 'multiple bursts' || leaks === 'sparks' || leaks === 'leaking') {
+        diagnosis.push('Player is overplaying the club and leaking power in stages.');
+        fittingMoves.push('Check whether butt/mid/tip are too stiff or feedback is too harsh.');
+        shaftBias.push('Use smoother load feedback or damping; do not chase lower launch by making the tip brutally stiff.');
+      }
+      if (commitment === 'weak') {
+        diagnosis.push('Player looks under-committed; this can be a club that is too light/weak, not necessarily a weak player.');
+        fittingMoves.push('Test added shaft weight or MOI/resistance to see whether speed and commitment wake up.');
+        shaftBias.push('Raise weight/resistance trial before recommending a lighter shaft.');
+      }
+      if (!diagnosis.length) {
+        diagnosis.push('No obvious visual-fit conflict recorded. Use impact marks and launch data as the main proof.');
+        fittingMoves.push('Keep the current shaft direction and change one variable at a time.');
+        shaftBias.push('Neutral visual fit: preserve feel while validating CPM, torque, launch, and dispersion.');
+      }
+      return {
+        diagnosis,
+        fitting_moves: fittingMoves,
+        shaft_design_bias: shaftBias,
+        warnings: [
+          'Shaft labels are not enough; visual motion can contradict high/low launch catalog claims.',
+          'Use loft/head/ball to tune ball flight when possible; do not force the shaft to solve every flight problem.',
+          'The right shaft is the player dancing partner: trust visible rhythm, balance, and contact proof.'
+        ]
+      };
     }
 
     function buildDiyDriverTuneup(payload) {
@@ -3848,6 +3990,7 @@ def home() -> str:
       const zoneList = document.getElementById('cameraZoneList');
       const proofList = document.getElementById('cameraProofList');
       const tuneupList = document.getElementById('cameraTuneupList');
+      const visualList = document.getElementById('cameraVisualList');
       const databaseList = document.getElementById('cameraDatabaseList');
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
@@ -3856,6 +3999,7 @@ def home() -> str:
         if (zoneList) zoneList.innerHTML = '<li>No build zones yet.</li>';
         if (proofList) proofList.innerHTML = '<li>No proof checklist yet.</li>';
         if (tuneupList) tuneupList.innerHTML = '<li>No tune-up plan yet.</li>';
+        if (visualList) visualList.innerHTML = '<li>No visual fitting read yet.</li>';
         if (databaseList) databaseList.innerHTML = '<li>No comparable shafts yet.</li>';
       } else {
         const fit = latestCameraSwingProfile.fit_target;
@@ -3892,6 +4036,16 @@ def home() -> str:
             ...(tuneup.warnings || []).map(item => `Warning: ${item}`)
           ];
           tuneupList.innerHTML = tuneupItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No tune-up plan yet.</li>';
+        }
+        if (visualList) {
+          const visual = fit.visual_fitting || {};
+          const visualItems = [
+            ...(visual.diagnosis || []),
+            ...(visual.fitting_moves || []),
+            ...(visual.shaft_design_bias || []).map(item => `Design bias: ${item}`),
+            ...(visual.warnings || []).map(item => `Rule: ${item}`)
+          ];
+          visualList.innerHTML = visualItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No visual fitting read yet.</li>';
         }
         if (databaseList) {
           databaseList.innerHTML = (fit.shaft_database_matches || []).map(item => `<li><strong>${escapeFitText(item.name)}</strong>: ${escapeFitText(item.profile)} (${item.match_score}/8 match)</li>`).join('') || '<li>No comparable shafts yet.</li>';
@@ -7602,6 +7756,11 @@ def api_swing_to_shaft(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/diy-driver-tuneup")
 def api_diy_driver_tuneup(payload: dict[str, Any]) -> dict[str, Any]:
     return diy_driver_tuneup(payload)
+
+
+@app.post("/api/visual-fitting")
+def api_visual_fitting(payload: dict[str, Any]) -> dict[str, Any]:
+    return visual_fitting_read(payload)
 
 
 @app.get("/api/fit-cad/bridge")

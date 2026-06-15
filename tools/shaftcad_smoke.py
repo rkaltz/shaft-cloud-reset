@@ -28,6 +28,8 @@ def main_check() -> None:
     require("Manufacturing Zones" in html, "Camera fitting manufacturing zones panel is missing")
     require("DIY Driver Tune-Up" in html, "DIY driver tune-up panel is missing")
     require("cameraImpactPattern" in html, "DIY impact-pattern input is missing")
+    require("Visual Fitting Read" in html, "Visual fitting panel is missing")
+    require("cameraVisualTransition" in html, "Visual fitting transition input is missing")
     require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
 
@@ -88,6 +90,12 @@ def main_check() -> None:
             "gripped_down_in": 0.5,
             "pw_shaft_weight_g": 120.0,
             "added_head_weight_g": 2.5,
+            "visual_tempo_control": "slow/insecure",
+            "visual_rhythm_float": "no float",
+            "visual_transition_move": "jump start",
+            "visual_commitment": "overplay",
+            "visual_one_arm_shoulder": "drop",
+            "visual_power_leaks": "sparks",
             "launch_deg": 13.2,
             "spin_rpm": 2500.0,
             "motion_quality": 82.0,
@@ -106,6 +114,11 @@ def main_check() -> None:
         any("shorter playing length" in item for item in swing_fit["diy_driver_tuneup"]["actions"]),
         "DIY driver tune-up did not react to heel impact",
     )
+    require(swing_fit["visual_fitting"]["diagnosis"], "Visual fitting diagnosis is missing")
+    require(
+        any("jump-start" in item for item in swing_fit["visual_fitting"]["diagnosis"]),
+        "Visual fitting did not react to jump-start transition",
+    )
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
     tuneup = main.diy_driver_tuneup(
@@ -120,6 +133,20 @@ def main_check() -> None:
     )
     require(tuneup["recommended_driver_shaft_weight_g"] == 65.0, "PW-to-driver shaft weight rule drifted")
     require(tuneup["warnings"], "DIY tune-up should warn on toe/heavy combination")
+
+    visual = main.visual_fitting_read(
+        {
+            "visual_tempo_control": "slow/insecure",
+            "visual_rhythm_float": "no float",
+            "visual_transition_move": "jump start",
+            "visual_commitment": "weak",
+            "visual_one_arm_shoulder": "drop",
+            "visual_power_leaks": "multiple bursts",
+        }
+    )
+    require(len(visual["fitting_moves"]) >= 3, "Visual fitting moves are incomplete")
+    require(any("more shaft weight" in item for item in visual["fitting_moves"]), "Visual fitting missed too-light/weak read")
+    require(any("Lower shaft/total weight" in item for item in visual["fitting_moves"]), "Visual fitting missed total-weight upper limit")
 
     direct_handoff = main.api_manufacturing_handoff()
     require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")
