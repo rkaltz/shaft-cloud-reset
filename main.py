@@ -1088,6 +1088,75 @@ def static_length_lie_fit(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def shaft_sensation_quality_read(payload: dict[str, Any]) -> dict[str, Any]:
+    """Blend subjective impact sensation with shot quality so speed is not the only shaft selector."""
+
+    speed_mph = float(payload.get("speed_mph", 105.0) or 105.0)
+    impact_sensation = str(payload.get("impact_sensation", "unknown") or "unknown").lower()
+    miss_direction = str(payload.get("shot_miss_direction", "unknown") or "unknown").lower()
+    quality_score = float(payload.get("shot_quality_score", 0.0) or 0.0)
+    accuracy_score = float(payload.get("shot_accuracy_score", 0.0) or 0.0)
+    preference_score = float(payload.get("shaft_preference_score", 0.0) or 0.0)
+    current_flex = str(payload.get("current_flex_label", "unknown") or "unknown").lower()
+    current_weight = float(payload.get("current_shaft_weight_g", 0.0) or 0.0)
+
+    findings: list[str] = [
+        "Do not select shaft flex from club speed alone; compare full profile, quality, accuracy, and feel.",
+        "Use 7-zone shaft profile and subjective impact sensation, not only butt frequency or a printed flex label.",
+    ]
+    recommendations: list[str] = []
+    design_bias: list[str] = []
+
+    if speed_mph >= 112:
+        findings.append("High club speed does not automatically mean the stiffest shaft wins.")
+        design_bias.append("Keep softer/profile-active candidates in the test set even for high-speed players.")
+
+    if impact_sensation in {"harsh", "dead", "boardy", "hard"}:
+        recommendations.append("Test a softer or more active profile before adding stiffness; harsh feedback can make the player fight the shaft.")
+        design_bias.append("Soften feedback in the butt/tip sections or add damping while maintaining enough weight for control.")
+    elif impact_sensation in {"loose", "whippy", "unstable"}:
+        recommendations.append("Test more stability through weight, torque, or mid/tip control before assuming the player needs a stiffer label.")
+        design_bias.append("Add stability locally; avoid making the entire shaft boardy.")
+    elif impact_sensation in {"solid", "easy", "loaded", "comfortable"}:
+        recommendations.append("Protect this feel while tuning launch, spin, and dispersion.")
+        design_bias.append("Preserve the current load feedback and adjust only the section causing the measured miss.")
+    else:
+        recommendations.append("Capture a simple pairwise preference after two shafts; subjective feel should become data, not a guess.")
+
+    if miss_direction in {"left", "hook", "pull left"}:
+        recommendations.append("Left misses with a soft/light feel can indicate the shaft is not stable enough for delivery.")
+        design_bias.append("Add mid/tip stability or torque control without jumping straight to the stiffest/heaviest build.")
+    elif miss_direction in {"right", "slice", "push right"}:
+        recommendations.append("Right misses with harsh/stiff feel can indicate the player cannot square the face comfortably.")
+        design_bias.append("Restore load/release feedback before reducing loft or forcing a lower-launch tip.")
+
+    if quality_score and preference_score:
+        if preference_score >= 7 and quality_score < 5:
+            recommendations.append("Player likes the feel but quality is weak; keep the feel direction and fix the section causing dispersion.")
+        elif quality_score >= 6 and preference_score < 5:
+            recommendations.append("Objective result is decent but sensation is poor; do not trust repeatability until feel improves.")
+        elif quality_score >= 6 and preference_score >= 7:
+            recommendations.append("Feel and shot quality agree; use this profile as the comparison anchor.")
+
+    if current_flex in {"s", "stiff", "x", "x-stiff", "extra stiff"} and impact_sensation in {"harsh", "dead", "boardy", "hard"}:
+        recommendations.append("Strong evidence to include regular/softer-profile candidates in comparison testing.")
+    if current_weight >= 78 and miss_direction in {"right", "slice", "push right"}:
+        recommendations.append("Heavy/stiff right-miss pattern: test lower total weight or more active release profile.")
+
+    return {
+        "impact_sensation": impact_sensation,
+        "shot_miss_direction": miss_direction,
+        "shot_quality_score": quality_score,
+        "shot_accuracy_score": accuracy_score,
+        "shaft_preference_score": preference_score,
+        "findings": findings,
+        "recommendations": recommendations,
+        "design_bias": design_bias,
+        "study_anchor": "Burger/Senner 2014: impact sensation and 7-zone shaft profile belong in shaft fitting; speed alone is insufficient.",
+        "boundary": "Subjective sensation is not proof by itself. Pair it with distance, accuracy, face impact, and repeatability.",
+    }
+
+
 def manufacturing_zones(fit: dict[str, Any], swing: dict[str, Any]) -> list[dict[str, Any]]:
     transition = fit["inputs"]["transition"]
     release = fit["inputs"]["release"]
@@ -1204,6 +1273,7 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     fit["visual_fitting"] = visual_fitting_read(payload)
     fit["launch_rollout_optimizer"] = driver_launch_rollout_optimizer(payload)
     fit["static_length_lie"] = static_length_lie_fit(payload)
+    fit["shaft_sensation_quality"] = shaft_sensation_quality_read(payload)
     return fit
 
 
@@ -2181,6 +2251,13 @@ def home() -> str:
               <div><label>Carry (yd)</label><input id="cameraCarry" type="number" value="0" step="1"></div>
               <div><label>Total (yd)</label><input id="cameraTotal" type="number" value="0" step="1"></div>
               <div><label>PW Carry (yd)</label><input id="cameraPwCarry" type="number" value="0" step="1"></div>
+              <div><label>Impact Sensation</label><select id="cameraImpactSensation"><option selected>unknown</option><option>solid</option><option>easy</option><option>loaded</option><option>comfortable</option><option>harsh</option><option>dead</option><option>boardy</option><option>loose</option><option>whippy</option><option>unstable</option></select></div>
+              <div><label>Shot Miss Direction</label><select id="cameraMissDirection"><option selected>unknown</option><option>left</option><option>right</option><option>straight</option><option>hook</option><option>slice</option><option>push right</option><option>pull left</option></select></div>
+              <div><label>Shot Quality (0-7)</label><input id="cameraQualityScore" type="number" value="0" step="0.5" min="0" max="7"></div>
+              <div><label>Accuracy (0-7)</label><input id="cameraAccuracyScore" type="number" value="0" step="0.5" min="0" max="7"></div>
+              <div><label>Shaft Preference (0-9)</label><input id="cameraPreferenceScore" type="number" value="0" step="0.5" min="0" max="9"></div>
+              <div><label>Current Flex</label><select id="cameraCurrentFlex"><option selected>unknown</option><option>R</option><option>S</option><option>X</option><option>A</option><option>L</option></select></div>
+              <div><label>Current Shaft Weight (g)</label><input id="cameraCurrentShaftWeight" type="number" value="0" step="1"></div>
               <div><label>Target Weight (g)</label><input id="cameraWeight" type="number" value="65" step="1"></div>
             </div>
             <div class="fit-actions">
@@ -2218,6 +2295,10 @@ def home() -> str:
               <div class="camera-section-card camera-wide-card">
                 <h4>Static Length / Lie Start</h4>
                 <ul id="cameraStaticFitList"><li>No static fit start yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>Shaft Sensation / Quality</h4>
+                <ul id="cameraSensationList"><li>No sensation/quality read yet.</li></ul>
               </div>
               <div class="camera-section-card camera-wide-card">
                 <h4>Starter Shaft Database Matches</h4>
@@ -3912,6 +3993,13 @@ def home() -> str:
         carry_yards: cameraNumber('cameraCarry', 0),
         total_yards: cameraNumber('cameraTotal', 0),
         pw_carry_yards: cameraNumber('cameraPwCarry', 0),
+        impact_sensation: document.getElementById('cameraImpactSensation')?.value || 'unknown',
+        shot_miss_direction: document.getElementById('cameraMissDirection')?.value || 'unknown',
+        shot_quality_score: cameraNumber('cameraQualityScore', 0),
+        shot_accuracy_score: cameraNumber('cameraAccuracyScore', 0),
+        shaft_preference_score: cameraNumber('cameraPreferenceScore', 0),
+        current_flex_label: document.getElementById('cameraCurrentFlex')?.value || 'unknown',
+        current_shaft_weight_g: cameraNumber('cameraCurrentShaftWeight', 0),
         weight_g: cameraNumber('cameraWeight', 65),
         motion_score: motionScore ?? 50,
         motion_quality: motionQuality ?? 70
@@ -3954,6 +4042,7 @@ def home() -> str:
       const visualFit = buildVisualFittingRead(payload);
       const rolloutRead = buildLaunchRolloutRead(payload);
       const staticFit = buildStaticLengthLieFit(payload);
+      const sensationQuality = buildShaftSensationQuality(payload);
       const why = [
         `${Number(payload.speed_mph).toFixed(0)} mph speed sets the base stiffness and weight class.`,
         `${inputs.tempo} tempo with ${inputs.transition} transition drives the handle/mid stability target.`,
@@ -4002,7 +4091,58 @@ def home() -> str:
       profile.visual_fitting = visualFit;
       profile.launch_rollout_optimizer = rolloutRead;
       profile.static_length_lie = staticFit;
+      profile.shaft_sensation_quality = sensationQuality;
       return profile;
+    }
+
+    function buildShaftSensationQuality(payload) {
+      const sensation = String(payload.impact_sensation || 'unknown').toLowerCase();
+      const miss = String(payload.shot_miss_direction || 'unknown').toLowerCase();
+      const quality = Number(payload.shot_quality_score || 0);
+      const preference = Number(payload.shaft_preference_score || 0);
+      const flex = String(payload.current_flex_label || 'unknown').toLowerCase();
+      const weight = Number(payload.current_shaft_weight_g || 0);
+      const findings = [
+        'Do not select shaft flex from club speed alone.',
+        'Use 7-zone shaft profile and subjective impact sensation, not only butt frequency or printed flex label.'
+      ];
+      const recommendations = [];
+      const designBias = [];
+      if (Number(payload.speed_mph || 0) >= 112) {
+        findings.push('High club speed does not automatically mean the stiffest shaft wins.');
+        designBias.push('Keep softer/profile-active candidates in the test set even for high-speed players.');
+      }
+      if (['harsh', 'dead', 'boardy', 'hard'].includes(sensation)) {
+        recommendations.push('Test a softer or more active profile before adding stiffness; harsh feedback can make the player fight the shaft.');
+        designBias.push('Soften feedback in the butt/tip sections or add damping while maintaining enough weight for control.');
+      } else if (['loose', 'whippy', 'unstable'].includes(sensation)) {
+        recommendations.push('Test more stability through weight, torque, or mid/tip control before assuming the player needs a stiffer label.');
+        designBias.push('Add stability locally; avoid making the entire shaft boardy.');
+      } else if (['solid', 'easy', 'loaded', 'comfortable'].includes(sensation)) {
+        recommendations.push('Protect this feel while tuning launch, spin, and dispersion.');
+        designBias.push('Preserve the current load feedback and adjust only the section causing the measured miss.');
+      } else {
+        recommendations.push('Capture pairwise preference after two shafts; subjective feel should become data, not a guess.');
+      }
+      if (['left', 'hook', 'pull left'].includes(miss)) {
+        recommendations.push('Left misses with a soft/light feel can indicate the shaft is not stable enough for delivery.');
+        designBias.push('Add mid/tip stability or torque control without jumping straight to the stiffest/heaviest build.');
+      }
+      if (['right', 'slice', 'push right'].includes(miss)) {
+        recommendations.push('Right misses with harsh/stiff feel can indicate the player cannot square the face comfortably.');
+        designBias.push('Restore load/release feedback before reducing loft or forcing a lower-launch tip.');
+      }
+      if (preference >= 7 && quality < 5) recommendations.push('Player likes the feel but quality is weak; keep the feel direction and fix the section causing dispersion.');
+      if (quality >= 6 && preference < 5) recommendations.push('Objective result is decent but sensation is poor; do not trust repeatability until feel improves.');
+      if (quality >= 6 && preference >= 7) recommendations.push('Feel and shot quality agree; use this profile as the comparison anchor.');
+      if (['s', 'stiff', 'x'].includes(flex) && ['harsh', 'dead', 'boardy'].includes(sensation)) recommendations.push('Include regular/softer-profile candidates in comparison testing.');
+      if (weight >= 78 && ['right', 'slice', 'push right'].includes(miss)) recommendations.push('Heavy/stiff right-miss pattern: test lower total weight or more active release profile.');
+      return {
+        findings,
+        recommendations,
+        design_bias: designBias,
+        study_anchor: 'Burger/Senner 2014: impact sensation and 7-zone shaft profile belong in shaft fitting; speed alone is insufficient.'
+      };
     }
 
     function buildStaticLengthLieFit(payload) {
@@ -4241,6 +4381,7 @@ def home() -> str:
       const visualList = document.getElementById('cameraVisualList');
       const rolloutList = document.getElementById('cameraRolloutList');
       const staticFitList = document.getElementById('cameraStaticFitList');
+      const sensationList = document.getElementById('cameraSensationList');
       const databaseList = document.getElementById('cameraDatabaseList');
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
@@ -4252,6 +4393,7 @@ def home() -> str:
         if (visualList) visualList.innerHTML = '<li>No visual fitting read yet.</li>';
         if (rolloutList) rolloutList.innerHTML = '<li>No launch/rollout read yet.</li>';
         if (staticFitList) staticFitList.innerHTML = '<li>No static fit start yet.</li>';
+        if (sensationList) sensationList.innerHTML = '<li>No sensation/quality read yet.</li>';
         if (databaseList) databaseList.innerHTML = '<li>No comparable shafts yet.</li>';
       } else {
         const fit = latestCameraSwingProfile.fit_target;
@@ -4321,6 +4463,16 @@ def home() -> str:
             ...(staticFit.notes || []).map(item => `Note: ${item}`)
           ];
           staticFitList.innerHTML = staticItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No static fit start yet.</li>';
+        }
+        if (sensationList) {
+          const sensation = fit.shaft_sensation_quality || {};
+          const sensationItems = [
+            ...(sensation.findings || []),
+            ...(sensation.recommendations || []),
+            ...(sensation.design_bias || []).map(item => `Design bias: ${item}`),
+            sensation.study_anchor ? `Study anchor: ${sensation.study_anchor}` : ''
+          ].filter(Boolean);
+          sensationList.innerHTML = sensationItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No sensation/quality read yet.</li>';
         }
         if (databaseList) {
           databaseList.innerHTML = (fit.shaft_database_matches || []).map(item => `<li><strong>${escapeFitText(item.name)}</strong>: ${escapeFitText(item.profile)} (${item.match_score}/8 match)</li>`).join('') || '<li>No comparable shafts yet.</li>';
@@ -8046,6 +8198,11 @@ def api_launch_rollout(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/static-length-lie")
 def api_static_length_lie(payload: dict[str, Any]) -> dict[str, Any]:
     return static_length_lie_fit(payload)
+
+
+@app.post("/api/shaft-sensation-quality")
+def api_shaft_sensation_quality(payload: dict[str, Any]) -> dict[str, Any]:
+    return shaft_sensation_quality_read(payload)
 
 
 @app.get("/api/fit-cad/bridge")

@@ -34,6 +34,8 @@ def main_check() -> None:
     require("cameraPwCarry" in html, "PW carry input is missing")
     require("Static Length / Lie Start" in html, "Static length/lie panel is missing")
     require("cameraWristFloor" in html, "Wrist-to-floor input is missing")
+    require("Shaft Sensation / Quality" in html, "Shaft sensation/quality panel is missing")
+    require("cameraImpactSensation" in html, "Impact sensation input is missing")
     require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
 
@@ -107,6 +109,13 @@ def main_check() -> None:
             "carry_yards": 250.0,
             "total_yards": 280.0,
             "pw_carry_yards": 123.0,
+            "impact_sensation": "harsh",
+            "shot_miss_direction": "right",
+            "shot_quality_score": 4.0,
+            "shot_accuracy_score": 4.0,
+            "shaft_preference_score": 3.0,
+            "current_flex_label": "S",
+            "current_shaft_weight_g": 82.0,
             "motion_quality": 82.0,
             "motion_score": 78.0,
         }
@@ -135,6 +144,11 @@ def main_check() -> None:
     )
     require(swing_fit["static_length_lie"]["recommended_7i_length_in"] == 37.75, "Static length recommendation drifted")
     require(swing_fit["static_length_lie"]["initial_lie_delta_deg"] == 1, "Static lie recommendation drifted")
+    require(swing_fit["shaft_sensation_quality"]["recommendations"], "Shaft sensation recommendations are missing")
+    require(
+        any("softer" in item for item in swing_fit["shaft_sensation_quality"]["recommendations"]),
+        "Shaft sensation read missed harsh/stiff softer-profile recommendation",
+    )
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
     tuneup = main.diy_driver_tuneup(
@@ -183,6 +197,20 @@ def main_check() -> None:
     tall_fit = main.static_length_lie_fit({"height_in": 76.0, "wrist_to_floor_in": 38.0})
     require(tall_fit["recommended_7i_length_in"] == 38.75, "Tall/static 7i length drifted")
     require(tall_fit["initial_lie_delta_deg"] == 2, "Tall/static lie recommendation drifted")
+
+    sensation = main.shaft_sensation_quality_read(
+        {
+            "speed_mph": 118.0,
+            "impact_sensation": "harsh",
+            "shot_miss_direction": "right",
+            "shot_quality_score": 4.0,
+            "shaft_preference_score": 3.0,
+            "current_flex_label": "X",
+            "current_shaft_weight_g": 82.0,
+        }
+    )
+    require(any("speed alone" in item for item in sensation["findings"]), "Sensation study finding is missing")
+    require(any("regular/softer" in item for item in sensation["recommendations"]), "Sensation read missed softer-profile candidate")
 
     direct_handoff = main.api_manufacturing_handoff()
     require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")
