@@ -1044,6 +1044,50 @@ def driver_launch_rollout_optimizer(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def static_length_lie_fit(payload: dict[str, Any]) -> dict[str, Any]:
+    """Initial static iron fit from height and wrist-to-floor before dynamic validation."""
+
+    height_in = float(payload.get("height_in", 69.0) or 69.0)
+    wrist_to_floor_in = float(payload.get("wrist_to_floor_in", 34.0) or 34.0)
+    standard_7i_length = 37.0
+
+    # Calibrated from the provided height/WTF chart: use it as a starting map, not a final fit.
+    length_delta = round(((height_in - 69.0) * 0.10 + (wrist_to_floor_in - 34.0) * 0.24) * 4.0) / 4.0
+    length_delta = max(-1.5, min(2.0, length_delta))
+    seven_iron_length = standard_7i_length + length_delta
+
+    lie_delta = round((wrist_to_floor_in - 34.0) * 1.0 - (height_in - 69.0) * 0.22)
+    lie_delta = int(max(-2, min(6, lie_delta)))
+    lie_label = "standard"
+    if lie_delta > 0:
+        lie_label = f"{lie_delta} deg upright"
+    elif lie_delta < 0:
+        lie_label = f"{abs(lie_delta)} deg flat"
+
+    notes = [
+        "Use height and wrist-to-floor only as the initial build position.",
+        "Confirm lie dynamically with face/sole marks, ball flight, and impact location.",
+        "Grip, posture, hand height, toe droop, and swing delivery can override the static chart.",
+        "For AE ShaftCAD, this is a setup baseline before the camera, visual fitting, and impact-mark layers take over.",
+    ]
+    if abs(length_delta) >= 1.0:
+        notes.append("Large length adjustment: validate posture and strike before applying the full chart value.")
+    if abs(lie_delta) >= 3:
+        notes.append("Large lie adjustment: confirm with dynamic lie testing before bending/building.")
+
+    return {
+        "height_in": height_in,
+        "wrist_to_floor_in": wrist_to_floor_in,
+        "standard_7i_length_in": standard_7i_length,
+        "recommended_7i_length_in": seven_iron_length,
+        "length_delta_in": length_delta,
+        "initial_lie_delta_deg": lie_delta,
+        "initial_lie_label": lie_label,
+        "notes": notes,
+        "boundary": "Static charts are starting points only; the final fit comes from dynamic strike, posture, and ball-flight proof.",
+    }
+
+
 def manufacturing_zones(fit: dict[str, Any], swing: dict[str, Any]) -> list[dict[str, Any]]:
     transition = fit["inputs"]["transition"]
     release = fit["inputs"]["release"]
@@ -1159,6 +1203,7 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     fit["diy_driver_tuneup"] = diy_driver_tuneup(payload)
     fit["visual_fitting"] = visual_fitting_read(payload)
     fit["launch_rollout_optimizer"] = driver_launch_rollout_optimizer(payload)
+    fit["static_length_lie"] = static_length_lie_fit(payload)
     return fit
 
 
@@ -2121,6 +2166,8 @@ def home() -> str:
               <div><label>Head Weight Feel</label><select id="cameraHeadWeightFeel"><option selected>unknown</option><option>light</option><option>good</option><option>heavy</option></select></div>
               <div><label>Current Driver Length</label><input id="cameraCurrentLength" type="number" value="45.5" step="0.25"></div>
               <div><label>Gripped Down Test</label><input id="cameraGrippedDown" type="number" value="0" step="0.25"></div>
+              <div><label>Height (in)</label><input id="cameraHeightIn" type="number" value="69" step="0.5"></div>
+              <div><label>Wrist to Floor (in)</label><input id="cameraWristFloor" type="number" value="34" step="0.5"></div>
               <div><label>PW Shaft Weight (g)</label><input id="cameraPwWeight" type="number" value="120" step="1"></div>
               <div><label>Added Head Weight (g)</label><input id="cameraAddedHeadWeight" type="number" value="0" step="0.5"></div>
               <div><label>Tempo Control</label><select id="cameraVisualTempo"><option selected>unknown</option><option>controlled</option><option>inconsistent</option><option>slow/insecure</option></select></div>
@@ -2167,6 +2214,10 @@ def home() -> str:
               <div class="camera-section-card camera-wide-card">
                 <h4>Launch / Rollout Optimizer</h4>
                 <ul id="cameraRolloutList"><li>No launch/rollout read yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>Static Length / Lie Start</h4>
+                <ul id="cameraStaticFitList"><li>No static fit start yet.</li></ul>
               </div>
               <div class="camera-section-card camera-wide-card">
                 <h4>Starter Shaft Database Matches</h4>
@@ -3846,6 +3897,8 @@ def home() -> str:
         head_weight_feel: document.getElementById('cameraHeadWeightFeel')?.value || 'unknown',
         current_length_in: cameraNumber('cameraCurrentLength', 45.5),
         gripped_down_in: cameraNumber('cameraGrippedDown', 0),
+        height_in: cameraNumber('cameraHeightIn', 69),
+        wrist_to_floor_in: cameraNumber('cameraWristFloor', 34),
         pw_shaft_weight_g: cameraNumber('cameraPwWeight', 120),
         added_head_weight_g: cameraNumber('cameraAddedHeadWeight', 0),
         visual_tempo_control: document.getElementById('cameraVisualTempo')?.value || 'unknown',
@@ -3900,6 +3953,7 @@ def home() -> str:
       const diyTuneup = buildDiyDriverTuneup(payload);
       const visualFit = buildVisualFittingRead(payload);
       const rolloutRead = buildLaunchRolloutRead(payload);
+      const staticFit = buildStaticLengthLieFit(payload);
       const why = [
         `${Number(payload.speed_mph).toFixed(0)} mph speed sets the base stiffness and weight class.`,
         `${inputs.tempo} tempo with ${inputs.transition} transition drives the handle/mid stability target.`,
@@ -3947,7 +4001,33 @@ def home() -> str:
       profile.diy_driver_tuneup = diyTuneup;
       profile.visual_fitting = visualFit;
       profile.launch_rollout_optimizer = rolloutRead;
+      profile.static_length_lie = staticFit;
       return profile;
+    }
+
+    function buildStaticLengthLieFit(payload) {
+      const height = Number(payload.height_in || 69);
+      const wrist = Number(payload.wrist_to_floor_in || 34);
+      const lengthDelta = Math.max(-1.5, Math.min(2, Math.round(((height - 69) * 0.10 + (wrist - 34) * 0.24) * 4) / 4));
+      const lieDelta = Math.max(-2, Math.min(6, Math.round((wrist - 34) * 1.0 - (height - 69) * 0.22)));
+      const lieLabel = lieDelta > 0 ? `${lieDelta} deg upright` : lieDelta < 0 ? `${Math.abs(lieDelta)} deg flat` : 'standard';
+      const notes = [
+        'Use height and wrist-to-floor only as the initial build position.',
+        'Confirm lie dynamically with face/sole marks, ball flight, and impact location.',
+        'Grip, posture, hand height, toe droop, and swing delivery can override the static chart.',
+        'This is a setup baseline before camera, visual fitting, and impact-mark layers take over.'
+      ];
+      if (Math.abs(lengthDelta) >= 1) notes.push('Large length adjustment: validate posture and strike before applying the full chart value.');
+      if (Math.abs(lieDelta) >= 3) notes.push('Large lie adjustment: confirm with dynamic lie testing before bending/building.');
+      return {
+        height_in: height,
+        wrist_to_floor_in: wrist,
+        recommended_7i_length_in: 37 + lengthDelta,
+        length_delta_in: lengthDelta,
+        initial_lie_delta_deg: lieDelta,
+        initial_lie_label: lieLabel,
+        notes
+      };
     }
 
     function rolloutTargetPercent(speed) {
@@ -4160,6 +4240,7 @@ def home() -> str:
       const tuneupList = document.getElementById('cameraTuneupList');
       const visualList = document.getElementById('cameraVisualList');
       const rolloutList = document.getElementById('cameraRolloutList');
+      const staticFitList = document.getElementById('cameraStaticFitList');
       const databaseList = document.getElementById('cameraDatabaseList');
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
@@ -4170,6 +4251,7 @@ def home() -> str:
         if (tuneupList) tuneupList.innerHTML = '<li>No tune-up plan yet.</li>';
         if (visualList) visualList.innerHTML = '<li>No visual fitting read yet.</li>';
         if (rolloutList) rolloutList.innerHTML = '<li>No launch/rollout read yet.</li>';
+        if (staticFitList) staticFitList.innerHTML = '<li>No static fit start yet.</li>';
         if (databaseList) databaseList.innerHTML = '<li>No comparable shafts yet.</li>';
       } else {
         const fit = latestCameraSwingProfile.fit_target;
@@ -4229,6 +4311,16 @@ def home() -> str:
             ...(rollout.proof_steps || []).map(item => `Proof: ${item}`)
           ];
           rolloutList.innerHTML = rolloutItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No launch/rollout read yet.</li>';
+        }
+        if (staticFitList) {
+          const staticFit = fit.static_length_lie || {};
+          const staticItems = [
+            `Height/WTF: ${Number(staticFit.height_in || 0).toFixed(1)} in / ${Number(staticFit.wrist_to_floor_in || 0).toFixed(1)} in.`,
+            `Initial 7i length: ${Number(staticFit.recommended_7i_length_in || 37).toFixed(2)} in (${Number(staticFit.length_delta_in || 0) >= 0 ? '+' : ''}${Number(staticFit.length_delta_in || 0).toFixed(2)}).`,
+            `Initial lie: ${staticFit.initial_lie_label || 'standard'}.`,
+            ...(staticFit.notes || []).map(item => `Note: ${item}`)
+          ];
+          staticFitList.innerHTML = staticItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No static fit start yet.</li>';
         }
         if (databaseList) {
           databaseList.innerHTML = (fit.shaft_database_matches || []).map(item => `<li><strong>${escapeFitText(item.name)}</strong>: ${escapeFitText(item.profile)} (${item.match_score}/8 match)</li>`).join('') || '<li>No comparable shafts yet.</li>';
@@ -7949,6 +8041,11 @@ def api_visual_fitting(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/launch-rollout")
 def api_launch_rollout(payload: dict[str, Any]) -> dict[str, Any]:
     return driver_launch_rollout_optimizer(payload)
+
+
+@app.post("/api/static-length-lie")
+def api_static_length_lie(payload: dict[str, Any]) -> dict[str, Any]:
+    return static_length_lie_fit(payload)
 
 
 @app.get("/api/fit-cad/bridge")

@@ -32,6 +32,8 @@ def main_check() -> None:
     require("cameraVisualTransition" in html, "Visual fitting transition input is missing")
     require("Launch / Rollout Optimizer" in html, "Launch rollout optimizer panel is missing")
     require("cameraPwCarry" in html, "PW carry input is missing")
+    require("Static Length / Lie Start" in html, "Static length/lie panel is missing")
+    require("cameraWristFloor" in html, "Wrist-to-floor input is missing")
     require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
 
@@ -90,6 +92,8 @@ def main_check() -> None:
             "head_weight_feel": "light",
             "current_length_in": 45.5,
             "gripped_down_in": 0.5,
+            "height_in": 72.0,
+            "wrist_to_floor_in": 36.0,
             "pw_shaft_weight_g": 120.0,
             "added_head_weight_g": 2.5,
             "visual_tempo_control": "slow/insecure",
@@ -129,6 +133,8 @@ def main_check() -> None:
         swing_fit["launch_rollout_optimizer"]["rollout_read"] == "rollout is inside the target window",
         "Launch rollout optimizer did not classify measured carry/roll correctly",
     )
+    require(swing_fit["static_length_lie"]["recommended_7i_length_in"] == 37.75, "Static length recommendation drifted")
+    require(swing_fit["static_length_lie"]["initial_lie_delta_deg"] == 1, "Static lie recommendation drifted")
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
     tuneup = main.diy_driver_tuneup(
@@ -169,6 +175,14 @@ def main_check() -> None:
     require(rollout["target_rollout_pct"] == 11.0, "100 mph rollout target should be 11%")
     require(rollout["actual_rollout_pct"] is not None, "rollout optimizer did not calculate actual rollout")
     require(rollout["pw_driver_carry_target"] == 233.45, "PW carry relationship drifted")
+
+    static_fit = main.static_length_lie_fit({"height_in": 69.0, "wrist_to_floor_in": 34.0})
+    require(static_fit["recommended_7i_length_in"] == 37.0, "Standard static 7i length drifted")
+    require(static_fit["initial_lie_delta_deg"] == 0, "Standard static lie drifted")
+
+    tall_fit = main.static_length_lie_fit({"height_in": 76.0, "wrist_to_floor_in": 38.0})
+    require(tall_fit["recommended_7i_length_in"] == 38.75, "Tall/static 7i length drifted")
+    require(tall_fit["initial_lie_delta_deg"] == 2, "Tall/static lie recommendation drifted")
 
     direct_handoff = main.api_manufacturing_handoff()
     require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")
