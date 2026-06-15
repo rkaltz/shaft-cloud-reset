@@ -742,6 +742,59 @@ def fit_target_from_swing(
     }
 
 
+def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate camera/manual swing capture metrics into a buildable shaft target."""
+
+    speed_mph = float(payload.get("speed_mph", 105.0) or 105.0)
+    launch_deg = float(payload.get("launch_deg", 13.5) or 13.5)
+    spin_rpm = float(payload.get("spin_rpm", 2650.0) or 2650.0)
+    weight_g = float(payload.get("weight_g", 65.0) or 65.0)
+    tempo_seconds = float(payload.get("tempo_seconds", 1.05) or 1.05)
+    transition_load = float(payload.get("transition_load", 55.0) or 55.0)
+    release_score = float(payload.get("release_score", 50.0) or 50.0)
+    closure_rate = float(payload.get("face_closure_rate", 50.0) or 50.0)
+    motion_quality = float(payload.get("motion_quality", 70.0) or 70.0)
+    motion_score = float(payload.get("motion_score", 50.0) or 50.0)
+
+    tempo = "Smooth" if tempo_seconds >= 1.18 else "Aggressive" if tempo_seconds <= 0.9 or motion_score >= 72 else "Medium"
+    transition = "Hard" if transition_load >= 68 or motion_score >= 78 else "Smooth" if transition_load <= 38 else "Medium"
+    release = "Late" if release_score >= 64 else "Early" if release_score <= 36 else "Mid"
+    miss = "Left" if closure_rate >= 68 else "Right" if closure_rate <= 32 else "High spin" if spin_rpm >= 3100 else "Low launch" if launch_deg <= 10.5 else "Neutral"
+    feel = "Boardy/stout" if transition == "Hard" and speed_mph >= 108 else "Softer load" if tempo == "Smooth" and transition != "Hard" else "Stable mid"
+
+    fit = fit_target_from_swing(
+        speed_mph=speed_mph,
+        launch_deg=launch_deg,
+        spin_rpm=spin_rpm,
+        weight_g=weight_g,
+        tempo=tempo,
+        transition=transition,
+        release=release,
+        miss=miss,
+        feel=feel,
+    )
+    fit["swing_capture"] = {
+        "source": payload.get("source", "camera/manual"),
+        "speed_mph": speed_mph,
+        "tempo_seconds": tempo_seconds,
+        "transition_load": transition_load,
+        "release_score": release_score,
+        "face_closure_rate": closure_rate,
+        "motion_quality": motion_quality,
+        "motion_score": motion_score,
+        "derived_inputs": {
+            "tempo": tempo,
+            "transition": transition,
+            "release": release,
+            "miss": miss,
+            "feel": feel,
+        },
+        "confidence": "usable" if motion_quality >= 65 else "manual review required",
+        "boundary": "Camera metrics are fitting inputs, not final manufacturing proof. Validate with CPM and range testing.",
+    }
+    return fit
+
+
 def generate_mandrel_gcode(
     segments: list[Segment],
     units: str = "mm",
@@ -1325,6 +1378,21 @@ def home() -> str:
     .fit-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
     .fit-builder-brief { border: 1px solid #cbd8d5; background: #f9fbfa; border-radius: 6px; padding: 12px; margin: 12px 0; }
     .fit-builder-brief h3 { margin-top: 0; }
+    .camera-fit-layout { display: grid; grid-template-columns: minmax(360px, 1.2fr) minmax(320px, 0.8fr); gap: 14px; align-items: start; }
+    .camera-stage { background: #101918; color: #d7fff6; border: 1px solid #2d3f3c; border-radius: 8px; padding: 12px; }
+    .camera-stage video { width: 100%; aspect-ratio: 16 / 9; background: #050808; border: 1px solid #344642; border-radius: 6px; display: block; object-fit: cover; }
+    .camera-stage canvas { display: none; }
+    .camera-hud { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: #c8d8d4; }
+    .camera-hud strong { color: #ffffff; }
+    .camera-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .camera-controls button { margin-top: 0; }
+    .camera-note { background: #fff8df; border: 1px solid #e7c56b; border-radius: 6px; color: #4d3600; padding: 10px; margin: 10px 0; font-size: 13px; line-height: 1.35; }
+    .swing-meter { height: 12px; background: #dbe4e1; border-radius: 999px; overflow: hidden; }
+    .swing-meter span { display: block; height: 100%; width: 0%; background: #17695f; transition: width 160ms linear; }
+    .camera-result { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 8px; padding: 12px; }
+    .camera-result h3 { margin-top: 0; }
+    .camera-capture-list { display: grid; gap: 7px; margin-top: 8px; }
+    .camera-capture-pill { border: 1px solid #d9e4e1; background: #eef5f3; border-radius: 6px; padding: 8px; font-size: 13px; }
     .brief-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .brief-card { border: 1px solid #d9e4e1; background: #ffffff; border-radius: 6px; padding: 10px; min-height: 96px; }
     .brief-card span { display: block; color: #50615e; font-size: 12px; font-weight: 800; text-transform: uppercase; }
@@ -1403,7 +1471,7 @@ def home() -> str:
       .cad-drawing-canvas { min-height: 520px; height: 64vh; }
       .cad-right-panel { max-height: none; }
     }
-    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
+    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid, .camera-fit-layout { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
     @media (max-width: 560px) { header { align-items: flex-start; flex-direction: column; } .metrics, .mini-grid, .primary-actions .secondary-row { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -1567,6 +1635,7 @@ def home() -> str:
         <div class="workspace-title">AE ShaftCAD Workbench</div>
         <div class="tabs">
           <button class="tab active" id="simTab" onclick="showView('simulation')">Simulation</button>
+          <button class="tab" id="cameraTab" onclick="showView('camera')">Camera Fit</button>
           <button class="tab" id="fitTab" onclick="showView('fit')">Fit-to-Build</button>
           <button class="tab" id="drawTab" onclick="showView('cad3d')">CAD Workspace</button>
           <button class="tab" id="flagTab" onclick="showView('flags')">Flag CAD</button>
@@ -1633,6 +1702,58 @@ def home() -> str:
         <pre id="library"></pre>
         <h3>Mandrel / Taper G-Code</h3>
         <pre id="gcode"></pre>
+      </div>
+      <div id="cameraView" class="view hidden">
+        <div class="cad-strip">
+          <div class="cad-chip">Workflow<strong>Swing Capture</strong></div>
+          <div class="cad-chip">Input<strong>Camera / Manual</strong></div>
+          <div class="cad-chip">Output<strong>Shaft Target</strong></div>
+          <div class="cad-chip">Status<strong id="cameraFitState">Not started</strong></div>
+        </div>
+        <div class="camera-fit-layout">
+          <div class="camera-stage">
+            <h3>Camera-Based Fitting</h3>
+            <video id="cameraVideo" playsinline muted></video>
+            <canvas id="cameraSampleCanvas" width="160" height="90"></canvas>
+            <div class="camera-hud">
+              <span>Camera: <strong id="cameraDeviceState">Off</strong></span>
+              <span>Capture: <strong id="cameraCaptureState">Idle</strong></span>
+              <span>Clean swings: <strong id="cameraSwingCount">0</strong></span>
+            </div>
+            <div class="swing-meter"><span id="cameraMotionMeter"></span></div>
+            <div class="camera-controls">
+              <button id="cameraStartBtn">Start Camera</button>
+              <button id="cameraCaptureBtn" class="secondary">Capture Swing</button>
+              <button id="cameraStopBtn" class="secondary">Stop Camera</button>
+            </div>
+            <div class="camera-note">
+              This is the restored swing-to-shaft lane. The browser camera creates motion-quality inputs when available; the manual fields below keep the builder usable when camera permission or hardware is unavailable.
+            </div>
+            <div id="cameraCaptureList" class="camera-capture-list"></div>
+          </div>
+          <div class="camera-result">
+            <h3>Swing Inputs</h3>
+            <div class="mini-grid">
+              <div><label>Club Speed (mph)</label><input id="cameraSpeed" type="number" value="105" step="1"></div>
+              <div><label>Tempo Seconds</label><input id="cameraTempoSeconds" type="number" value="1.05" step="0.01"></div>
+              <div><label>Transition Load</label><input id="cameraTransitionLoad" type="number" value="55" step="1" min="0" max="100"></div>
+              <div><label>Release Score</label><input id="cameraReleaseScore" type="number" value="50" step="1" min="0" max="100"></div>
+              <div><label>Face Closure Rate</label><input id="cameraClosureRate" type="number" value="50" step="1" min="0" max="100"></div>
+              <div><label>Launch (deg)</label><input id="cameraLaunch" type="number" value="13.5" step="0.1"></div>
+              <div><label>Spin (rpm)</label><input id="cameraSpin" type="number" value="2650" step="10"></div>
+              <div><label>Target Weight (g)</label><input id="cameraWeight" type="number" value="65" step="1"></div>
+            </div>
+            <div class="fit-actions">
+              <button id="cameraManualBtn">Analyze Manual Swing</button>
+              <button id="cameraToFitBtn" class="secondary">Send to Fit Builder</button>
+              <button id="cameraToCadBtn" class="secondary">Apply to CAD</button>
+            </div>
+            <h3>AI Shaft Result</h3>
+            <table><tbody id="cameraFitResult"></tbody></table>
+            <h3>Capture Packet</h3>
+            <pre id="cameraPacket">No swing packet yet.</pre>
+          </div>
+        </div>
       </div>
       <div id="fitView" class="view hidden">
         <div class="cad-strip">
@@ -2081,6 +2202,12 @@ def home() -> str:
     let sketchTool = 'select';
     let latestFitProfile = null;
     let fitCadBridge = null;
+    let cameraStream = null;
+    let cameraMotionSamples = [];
+    let cameraCaptures = [];
+    let latestCameraSwingProfile = null;
+    let cameraSampleTimer = null;
+    let cameraPreviousBrightness = null;
     let flagConstraints = defaultFlagConstraints(defaultFlags().length);
     const debugState = {
       bootTime: new Date().toISOString(),
@@ -2931,6 +3058,7 @@ def home() -> str:
     function showView(viewName) {
       if (viewName === 'drawing') viewName = 'cad3d';
       const simulation = document.getElementById('simulationView');
+      const cameraView = document.getElementById('cameraView');
       const fitView = document.getElementById('fitView');
       const drawing = document.getElementById('drawingView');
       const flagView = document.getElementById('flagView');
@@ -2938,6 +3066,7 @@ def home() -> str:
       const stackView = document.getElementById('stackView');
       const cad3dView = document.getElementById('cad3dView');
       const simTab = document.getElementById('simTab');
+      const cameraTab = document.getElementById('cameraTab');
       const fitTab = document.getElementById('fitTab');
       const drawTab = document.getElementById('drawTab');
       const flagTab = document.getElementById('flagTab');
@@ -2945,6 +3074,7 @@ def home() -> str:
       const stackTab = document.getElementById('stackTab');
       const cad3dTab = document.getElementById('cad3dTab');
       simulation.classList.toggle('hidden', viewName !== 'simulation');
+      cameraView.classList.toggle('hidden', viewName !== 'camera');
       fitView.classList.toggle('hidden', viewName !== 'fit');
       drawing.classList.toggle('hidden', viewName !== 'drawing');
       flagView.classList.toggle('hidden', viewName !== 'flags');
@@ -2952,12 +3082,14 @@ def home() -> str:
       stackView.classList.toggle('hidden', viewName !== 'stack');
       cad3dView.classList.toggle('hidden', viewName !== 'cad3d');
       simTab.classList.toggle('active', viewName === 'simulation');
+      cameraTab.classList.toggle('active', viewName === 'camera');
       fitTab.classList.toggle('active', viewName === 'fit');
       drawTab.classList.toggle('active', viewName === 'cad3d');
       flagTab.classList.toggle('active', viewName === 'flags');
       tapeTab.classList.toggle('active', viewName === 'tape');
       stackTab.classList.toggle('active', viewName === 'stack');
       cad3dTab.classList.toggle('active', false);
+      if (viewName === 'camera') renderCameraFitResult();
       if (viewName === 'fit') renderFitBridge();
       if (viewName === 'flags') renderFlagEditor();
       if (viewName === 'tape') renderTapeCad();
@@ -3253,6 +3385,214 @@ def home() -> str:
         '"': '&quot;',
         "'": '&#39;'
       }[char]));
+    }
+
+    function cameraNumber(id, fallback) {
+      return Number(document.getElementById(id)?.value || fallback);
+    }
+
+    function setCameraState(message, isBad) {
+      const state = document.getElementById('cameraFitState');
+      if (state) state.textContent = message;
+      setAppStatus(`Camera Fit: ${message}`, Boolean(isBad));
+    }
+
+    function updateCameraHud(device, capture) {
+      const deviceEl = document.getElementById('cameraDeviceState');
+      const captureEl = document.getElementById('cameraCaptureState');
+      const countEl = document.getElementById('cameraSwingCount');
+      if (deviceEl && device) deviceEl.textContent = device;
+      if (captureEl && capture) captureEl.textContent = capture;
+      if (countEl) countEl.textContent = String(cameraCaptures.length);
+    }
+
+    function cameraManualPayload(source, motionScore, motionQuality) {
+      return {
+        source,
+        speed_mph: cameraNumber('cameraSpeed', 105),
+        tempo_seconds: cameraNumber('cameraTempoSeconds', 1.05),
+        transition_load: cameraNumber('cameraTransitionLoad', 55),
+        release_score: cameraNumber('cameraReleaseScore', 50),
+        face_closure_rate: cameraNumber('cameraClosureRate', 50),
+        launch_deg: cameraNumber('cameraLaunch', 13.5),
+        spin_rpm: cameraNumber('cameraSpin', 2650),
+        weight_g: cameraNumber('cameraWeight', 65),
+        motion_score: motionScore ?? 50,
+        motion_quality: motionQuality ?? 70
+      };
+    }
+
+    function deriveCameraPayloadFromSamples() {
+      const samples = cameraMotionSamples.slice();
+      const avgMotion = samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : 0;
+      const peakMotion = samples.length ? Math.max(...samples) : 0;
+      const motionScore = Math.max(0, Math.min(100, Math.round(avgMotion * 2.4 + peakMotion * 1.2)));
+      const motionQuality = Math.max(35, Math.min(96, Math.round(88 - Math.abs(samples.length - 30) * 1.4 + Math.min(peakMotion, 18))));
+      const payload = cameraManualPayload('browser-camera', motionScore, motionQuality);
+      payload.transition_load = Math.max(payload.transition_load, Math.min(100, Math.round(42 + peakMotion * 1.9)));
+      payload.tempo_seconds = Math.max(0.65, Math.min(1.45, payload.tempo_seconds - Math.min(0.22, avgMotion / 260)));
+      return payload;
+    }
+
+    function buildSwingFitFromPayload(payload) {
+      const tempo = payload.tempo_seconds >= 1.18 ? 'Smooth' : (payload.tempo_seconds <= 0.9 || payload.motion_score >= 72 ? 'Aggressive' : 'Medium');
+      const transition = payload.transition_load >= 68 || payload.motion_score >= 78 ? 'Hard' : payload.transition_load <= 38 ? 'Smooth' : 'Medium';
+      const release = payload.release_score >= 64 ? 'Late' : payload.release_score <= 36 ? 'Early' : 'Mid';
+      const miss = payload.face_closure_rate >= 68 ? 'Left' : payload.face_closure_rate <= 32 ? 'Right' : payload.spin_rpm >= 3100 ? 'High spin' : payload.launch_deg <= 10.5 ? 'Low launch' : 'Neutral';
+      const feel = transition === 'Hard' && payload.speed_mph >= 108 ? 'Boardy/stout' : tempo === 'Smooth' && transition !== 'Hard' ? 'Softer load' : 'Stable mid';
+      const saved = {
+        fitSpeed: payload.speed_mph,
+        fitTempo: tempo,
+        fitTransition: transition,
+        fitRelease: release,
+        fitLaunch: payload.launch_deg,
+        fitSpin: payload.spin_rpm,
+        fitMiss: miss,
+        fitFeel: feel,
+        fitWeight: payload.weight_g
+      };
+      Object.entries(saved).forEach(([id, value]) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+      });
+      runFitToBuild();
+      latestCameraSwingProfile = {
+        captured_at: new Date().toISOString(),
+        payload,
+        derived_inputs: {tempo, transition, release, miss, feel},
+        fit_target: latestFitProfile,
+        boundary: 'Use this as a shaft design starting point. Validate with measured CPM, launch monitor, and player feedback.'
+      };
+      cameraCaptures = [latestCameraSwingProfile, ...cameraCaptures].slice(0, 5);
+      renderCameraFitResult();
+      return latestCameraSwingProfile;
+    }
+
+    function renderCameraFitResult() {
+      updateCameraHud();
+      const result = document.getElementById('cameraFitResult');
+      const packet = document.getElementById('cameraPacket');
+      const list = document.getElementById('cameraCaptureList');
+      if (!latestCameraSwingProfile) {
+        if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
+        if (packet) packet.textContent = 'No swing packet yet.';
+      } else {
+        const fit = latestCameraSwingProfile.fit_target;
+        const inputs = latestCameraSwingProfile.derived_inputs;
+        if (result) {
+          result.innerHTML = [
+            ['Target CPM', fit.target_cpm.toFixed(1)],
+            ['Wrap Angle', fit.wrap_angle_deg.toFixed(0) + ' deg'],
+            ['Torque Target', fit.torque_target_deg.toFixed(2) + ' deg'],
+            ['Material', fit.builder_brief.recommended_material],
+            ['Architecture', fit.builder_brief.recommended_architecture.replace(/_/g, ' ')],
+            ['Derived Tempo', inputs.tempo],
+            ['Derived Transition', inputs.transition],
+            ['Derived Release', inputs.release],
+            ['Miss Bias', inputs.miss],
+            ['Confidence', latestCameraSwingProfile.payload.motion_quality + ' / 100']
+          ].map(row => `<tr><td>${row[0]}</td><td>${escapeFitText(row[1])}</td></tr>`).join('');
+        }
+        if (packet) packet.textContent = JSON.stringify(latestCameraSwingProfile, null, 2);
+      }
+      if (list) {
+        list.innerHTML = cameraCaptures.map((item, index) => {
+          const fit = item.fit_target;
+          return `<div class="camera-capture-pill"><strong>Swing ${index + 1}</strong> - ${fit.target_cpm.toFixed(1)} CPM, ${item.derived_inputs.transition} transition, ${item.payload.motion_quality}/100 quality</div>`;
+        }).join('');
+      }
+    }
+
+    async function startCameraFit(button) {
+      flashButton(button, 'Starting');
+      const video = document.getElementById('cameraVideo');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        updateCameraHud('Unavailable', 'Manual mode');
+        setCameraState('Browser camera unavailable; manual swing mode is ready.', true);
+        return;
+      }
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+        video.srcObject = cameraStream;
+        await video.play();
+        updateCameraHud('Live', 'Ready');
+        setCameraState('Camera live. Capture a swing when ready.');
+      } catch (error) {
+        updateCameraHud('Blocked', 'Manual mode');
+        setCameraState(`Camera blocked: ${error.message || String(error)}. Manual swing mode is ready.`, true);
+      }
+    }
+
+    function stopCameraFit(button) {
+      flashButton(button, 'Stopped');
+      if (cameraSampleTimer) window.clearInterval(cameraSampleTimer);
+      cameraSampleTimer = null;
+      if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+      cameraStream = null;
+      cameraPreviousBrightness = null;
+      const video = document.getElementById('cameraVideo');
+      if (video) video.srcObject = null;
+      updateCameraHud('Off', 'Idle');
+      setCameraState('Camera stopped.');
+    }
+
+    function sampleCameraMotion() {
+      const video = document.getElementById('cameraVideo');
+      const canvas = document.getElementById('cameraSampleCanvas');
+      const meter = document.getElementById('cameraMotionMeter');
+      if (!video || !canvas || video.readyState < 2) return;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let brightness = 0;
+      for (let i = 0; i < data.length; i += 16) {
+        brightness += (data[i] + data[i + 1] + data[i + 2]) / 3;
+      }
+      brightness = brightness / (data.length / 16);
+      const motion = cameraPreviousBrightness == null ? 0 : Math.abs(brightness - cameraPreviousBrightness);
+      cameraPreviousBrightness = brightness;
+      cameraMotionSamples.push(motion);
+      if (meter) meter.style.width = `${Math.max(4, Math.min(100, motion * 6))}%`;
+    }
+
+    function startCameraSwingCapture(button) {
+      flashButton(button, 'Capturing');
+      cameraMotionSamples = [];
+      cameraPreviousBrightness = null;
+      updateCameraHud(cameraStream ? 'Live' : 'Manual', 'Capturing');
+      setCameraState('Capturing swing window.');
+      if (cameraSampleTimer) window.clearInterval(cameraSampleTimer);
+      cameraSampleTimer = window.setInterval(sampleCameraMotion, 180);
+      window.setTimeout(() => {
+        if (cameraSampleTimer) window.clearInterval(cameraSampleTimer);
+        cameraSampleTimer = null;
+        const profile = buildSwingFitFromPayload(cameraStream ? deriveCameraPayloadFromSamples() : cameraManualPayload('manual-no-camera', 50, 65));
+        updateCameraHud(cameraStream ? 'Live' : 'Manual', 'Analyzed');
+        setCameraState(`Swing analyzed: ${profile.fit_target.target_cpm.toFixed(1)} CPM target generated.`);
+      }, 5400);
+    }
+
+    function analyzeManualSwing(button) {
+      flashButton(button, 'Analyzed');
+      const profile = buildSwingFitFromPayload(cameraManualPayload('manual-entry', 50, 72));
+      updateCameraHud(cameraStream ? 'Live' : 'Manual', 'Analyzed');
+      setCameraState(`Manual swing analyzed: ${profile.fit_target.target_cpm.toFixed(1)} CPM target generated.`);
+    }
+
+    function sendCameraToFit(button) {
+      if (!latestCameraSwingProfile) analyzeManualSwing();
+      flashButton(button, 'Sent');
+      showView('fit');
+      renderFitBridge('camera->fit');
+      setCameraState('Camera swing sent to Fit-to-Build.');
+    }
+
+    function applyCameraToCad(button) {
+      if (!latestCameraSwingProfile) analyzeManualSwing();
+      flashButton(button, 'Applied');
+      applyFitToCad();
+      showView('cad3d');
+      setCameraState('Camera swing applied to CAD.');
     }
 
     function fitTorqueWindow(torqueTarget) {
@@ -6385,6 +6725,7 @@ method = "${document.getElementById('method').value}"`
     function buttonRoutes() {
       return {
         simTab: () => showView('simulation'),
+        cameraTab: () => showView('camera'),
         fitTab: () => showView('fit'),
         drawTab: () => showView('drawing'),
         flagTab: () => showView('flags'),
@@ -6403,6 +6744,12 @@ method = "${document.getElementById('method').value}"`
         materialDeleteBtn: button => deleteSelectedMaterial(button),
         materialExportBtn: button => exportMaterials(button),
         materialImportBtn: () => document.getElementById('materialFile')?.click(),
+        cameraStartBtn: button => startCameraFit(button),
+        cameraCaptureBtn: button => startCameraSwingCapture(button),
+        cameraStopBtn: button => stopCameraFit(button),
+        cameraManualBtn: button => analyzeManualSwing(button),
+        cameraToFitBtn: button => sendCameraToFit(button),
+        cameraToCadBtn: button => applyCameraToCad(button),
         fitGenerateBtn: button => runFitToBuild(button),
         fitApplyBtn: button => applyFitToCad(button),
         fitExportBtn: button => downloadFitProfile(button),
@@ -6553,6 +6900,12 @@ method = "${document.getElementById('method').value}"`
     window.setSketchTool = setSketchTool;
     window.handleSketchMenu = handleSketchMenu;
     window.run = run;
+    window.startCameraFit = startCameraFit;
+    window.startCameraSwingCapture = startCameraSwingCapture;
+    window.stopCameraFit = stopCameraFit;
+    window.analyzeManualSwing = analyzeManualSwing;
+    window.sendCameraToFit = sendCameraToFit;
+    window.applyCameraToCad = applyCameraToCad;
     window.runFitToBuild = runFitToBuild;
     window.applyFitToCad = applyFitToCad;
     window.downloadFitProfile = downloadFitProfile;
@@ -6836,6 +7189,11 @@ def api_fit_target(
         miss=miss,
         feel=feel,
     )
+
+
+@app.post("/api/swing-to-shaft")
+def api_swing_to_shaft(payload: dict[str, Any]) -> dict[str, Any]:
+    return swing_capture_to_fit(payload)
 
 
 @app.get("/api/fit-cad/bridge")

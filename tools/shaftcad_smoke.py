@@ -20,6 +20,8 @@ def require(condition: bool, message: str) -> None:
 def main_check() -> None:
     html = main.home()
     require("AI Shaft Builder Brief" in html, "Fit-to-build UI is missing")
+    require("Camera Fit" in html, "Camera fitting tab is missing")
+    require("startCameraFit" in html, "Camera fitting controls are not wired")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
 
     design = main.analyze_shaft()
@@ -59,6 +61,24 @@ def main_check() -> None:
     require(fit["builder_brief"]["recommended_material"] == "Toray M40J", "hard-transition material recommendation drifted")
     require(fit["builder_brief"]["recommended_architecture"] == "braid_tape_braid", "hard-transition architecture drifted")
     require(fit["cad_translation"]["bias_pair_deg"][0] == fit["wrap_angle_deg"], "Fit/CAD wrap transfer mismatch")
+
+    swing_fit = main.swing_capture_to_fit(
+        {
+            "source": "smoke-camera",
+            "speed_mph": 112.0,
+            "tempo_seconds": 0.88,
+            "transition_load": 74.0,
+            "release_score": 68.0,
+            "face_closure_rate": 42.0,
+            "launch_deg": 13.2,
+            "spin_rpm": 2500.0,
+            "motion_quality": 82.0,
+            "motion_score": 78.0,
+        }
+    )
+    require(swing_fit["inputs"]["transition"] == "Hard", "camera swing transition derivation drifted")
+    require(swing_fit["swing_capture"]["confidence"] == "usable", "camera swing confidence drifted")
+    require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
     direct_handoff = main.api_manufacturing_handoff()
     require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")
