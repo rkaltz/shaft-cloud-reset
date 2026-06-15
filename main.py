@@ -2062,11 +2062,14 @@ def home() -> str:
     .fit-builder-brief h3 { margin-top: 0; }
     .camera-fit-layout { display: grid; grid-template-columns: minmax(360px, 1.2fr) minmax(320px, 0.8fr); gap: 14px; align-items: start; }
     .camera-stage { background: #101918; color: #d7fff6; border: 1px solid #2d3f3c; border-radius: 8px; padding: 12px; }
+    .camera-feed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .camera-feed-card { border: 1px solid #344642; border-radius: 8px; padding: 8px; background: #0a1211; }
+    .camera-feed-card h4 { margin: 0 0 7px; color: #ffffff; }
     .camera-stage video { width: 100%; aspect-ratio: 16 / 9; background: #050808; border: 1px solid #344642; border-radius: 6px; display: block; object-fit: cover; }
     .camera-stage canvas { display: none; }
     .camera-hud { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: #c8d8d4; }
     .camera-hud strong { color: #ffffff; }
-    .camera-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .camera-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
     .camera-controls button { margin-top: 0; }
     .camera-note { background: #fff8df; border: 1px solid #e7c56b; border-radius: 6px; color: #4d3600; padding: 10px; margin: 10px 0; font-size: 13px; line-height: 1.35; }
     .swing-meter { height: 12px; background: #dbe4e1; border-radius: 999px; overflow: hidden; }
@@ -2164,7 +2167,7 @@ def home() -> str:
       .cad-drawing-canvas { min-height: 520px; height: 64vh; }
       .cad-right-panel { max-height: none; }
     }
-    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid, .camera-fit-layout, .camera-section-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
+    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid, .camera-fit-layout, .camera-feed-grid, .camera-section-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
     @media (max-width: 560px) { header { align-items: flex-start; flex-direction: column; } .metrics, .mini-grid, .primary-actions .secondary-row { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -2406,21 +2409,33 @@ def home() -> str:
         <div class="camera-fit-layout">
           <div class="camera-stage">
             <h3>Camera-Based Fitting</h3>
-            <video id="cameraVideo" playsinline muted></video>
-            <canvas id="cameraSampleCanvas" width="160" height="90"></canvas>
+            <div class="camera-feed-grid">
+              <div class="camera-feed-card">
+                <h4>Camera 1 - Face On</h4>
+                <video id="cameraVideoFace" playsinline muted></video>
+                <canvas id="cameraSampleCanvasFace" width="160" height="90"></canvas>
+                <div class="swing-meter"><span id="cameraMotionMeterFace"></span></div>
+              </div>
+              <div class="camera-feed-card">
+                <h4>Camera 2 - Down the Line</h4>
+                <video id="cameraVideoDownLine" playsinline muted></video>
+                <canvas id="cameraSampleCanvasDownLine" width="160" height="90"></canvas>
+                <div class="swing-meter"><span id="cameraMotionMeterDownLine"></span></div>
+              </div>
+            </div>
             <div class="camera-hud">
               <span>Camera: <strong id="cameraDeviceState">Off</strong></span>
               <span>Capture: <strong id="cameraCaptureState">Idle</strong></span>
               <span>Clean swings: <strong id="cameraSwingCount">0</strong></span>
             </div>
-            <div class="swing-meter"><span id="cameraMotionMeter"></span></div>
             <div class="camera-controls">
-              <button id="cameraStartBtn">Start Camera</button>
+              <button id="cameraStartBtn">Start Cameras</button>
               <button id="cameraCaptureBtn" class="secondary">Capture Swing</button>
-              <button id="cameraStopBtn" class="secondary">Stop Camera</button>
+              <button id="cameraAiReviewBtn" class="secondary">AI Review Captured Swings</button>
+              <button id="cameraStopBtn" class="secondary">Stop Cameras</button>
             </div>
             <div class="camera-note">
-              This is the restored swing-to-shaft lane. The browser camera creates motion-quality inputs when available; the manual fields below keep the builder usable when camera permission or hardware is unavailable.
+              Use Camera 1 face-on for setup, tempo, pressure shift, and shaft load clues. Use Camera 2 down the line for plane, path, hand path, and delivery clues. Manual fields keep the builder usable when camera permission or hardware is unavailable.
             </div>
             <div id="cameraCaptureList" class="camera-capture-list"></div>
           </div>
@@ -2533,6 +2548,10 @@ def home() -> str:
               <div class="camera-section-card camera-wide-card">
                 <h4>Fitter Starting Direction</h4>
                 <ul id="cameraInterviewList"><li>No interview direction yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>AI Swing Review</h4>
+                <ul id="cameraAiReviewList"><li>No AI swing review yet.</li></ul>
               </div>
               <div class="camera-section-card camera-wide-card">
                 <h4>Why This Shaft</h4>
@@ -3028,11 +3047,14 @@ def home() -> str:
     let latestFitProfile = null;
     let fitCadBridge = null;
     let cameraStream = null;
+    let cameraStreams = {face: null, downLine: null};
     let cameraMotionSamples = [];
+    let cameraMotionSamplesByView = {face: [], downLine: []};
     let cameraCaptures = [];
     let latestCameraSwingProfile = null;
     let cameraSampleTimer = null;
     let cameraPreviousBrightness = null;
+    let cameraPreviousBrightnessByView = {face: null, downLine: null};
     let flagConstraints = defaultFlagConstraints(defaultFlags().length);
     const debugState = {
       bootTime: new Date().toISOString(),
@@ -4339,6 +4361,18 @@ def home() -> str:
         current_shaft_weight_g: cameraNumber('cameraCurrentShaftWeight', 0),
         current_torque_deg: cameraNumber('cameraCurrentTorque', 0),
         fitting_interview: fittingInterviewPayload(),
+        camera_views: {
+          face_on: {
+            label: 'Camera 1 - Face On',
+            role: 'setup, body motion, tempo, pressure shift, release timing, and face-on shaft load clues',
+            samples: cameraMotionSamplesByView.face.slice(-40)
+          },
+          down_the_line: {
+            label: 'Camera 2 - Down the Line',
+            role: 'swing plane, hand path, shaft plane, delivery path, and down-line club motion clues',
+            samples: cameraMotionSamplesByView.downLine.slice(-40)
+          }
+        },
         weight_g: cameraNumber('cameraWeight', 65),
         motion_score: motionScore ?? 50,
         motion_quality: motionQuality ?? 70
@@ -4346,7 +4380,10 @@ def home() -> str:
     }
 
     function deriveCameraPayloadFromSamples() {
-      const samples = cameraMotionSamples.slice();
+      const faceSamples = cameraMotionSamplesByView.face.slice();
+      const downLineSamples = cameraMotionSamplesByView.downLine.slice();
+      const samples = [...faceSamples, ...downLineSamples];
+      cameraMotionSamples = samples.slice();
       const avgMotion = samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : 0;
       const peakMotion = samples.length ? Math.max(...samples) : 0;
       const motionScore = Math.max(0, Math.min(100, Math.round(avgMotion * 2.4 + peakMotion * 1.2)));
@@ -4355,6 +4392,13 @@ def home() -> str:
       payload.transition_load = Math.max(payload.transition_load, Math.min(100, Math.round(42 + peakMotion * 1.9)));
       payload.shaft_load_index = Math.max(payload.shaft_load_index, Math.min(100, Math.round(45 + peakMotion * 2.1)));
       payload.tempo_seconds = Math.max(0.65, Math.min(1.45, payload.tempo_seconds - Math.min(0.22, avgMotion / 260)));
+      payload.camera_review_seed = {
+        face_on_samples: faceSamples.length,
+        down_line_samples: downLineSamples.length,
+        face_on_peak_motion: faceSamples.length ? Math.max(...faceSamples) : 0,
+        down_line_peak_motion: downLineSamples.length ? Math.max(...downLineSamples) : 0,
+        review_note: 'Use face-on for setup/load/tempo and down-line for path/plane/delivery.'
+      };
       return payload;
     }
 
@@ -4831,6 +4875,7 @@ def home() -> str:
       const packet = document.getElementById('cameraPacket');
       const list = document.getElementById('cameraCaptureList');
       const interviewList = document.getElementById('cameraInterviewList');
+      const aiReviewList = document.getElementById('cameraAiReviewList');
       const whyList = document.getElementById('cameraWhyList');
       const zoneList = document.getElementById('cameraZoneList');
       const proofList = document.getElementById('cameraProofList');
@@ -4845,6 +4890,7 @@ def home() -> str:
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
         if (packet) packet.textContent = 'No swing packet yet.';
         if (interviewList) interviewList.innerHTML = '<li>No interview direction yet.</li>';
+        if (aiReviewList) aiReviewList.innerHTML = '<li>No AI swing review yet.</li>';
         if (whyList) whyList.innerHTML = '<li>No fit explanation yet.</li>';
         if (zoneList) zoneList.innerHTML = '<li>No build zones yet.</li>';
         if (proofList) proofList.innerHTML = '<li>No proof checklist yet.</li>';
@@ -4881,6 +4927,16 @@ def home() -> str:
             interview.source ? `Source: ${interview.source}` : ''
           ].filter(Boolean);
           interviewList.innerHTML = interviewItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No interview direction yet.</li>';
+        }
+        if (aiReviewList) {
+          const review = latestCameraSwingProfile.ai_review || cameraCaptures[0]?.ai_review;
+          const reviewItems = review ? [
+            `Verdict: ${review.verdict}`,
+            ...(review.findings || []),
+            ...(review.next_actions || []).map(item => `Next: ${item}`),
+            review.boundary ? `Boundary: ${review.boundary}` : ''
+          ].filter(Boolean) : [];
+          aiReviewList.innerHTML = reviewItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No AI swing review yet.</li>';
         }
         if (whyList) {
           whyList.innerHTML = (fit.why_this_fit || []).map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No fit explanation yet.</li>';
@@ -4965,25 +5021,117 @@ def home() -> str:
       if (list) {
         list.innerHTML = cameraCaptures.map((item, index) => {
           const fit = item.fit_target;
-          return `<div class="camera-capture-pill"><strong>Swing ${index + 1}</strong> - ${fit.target_cpm.toFixed(1)} CPM, ${item.derived_inputs.transition} transition, ${item.payload.motion_quality}/100 quality</div>`;
+          const seed = item.payload.camera_review_seed || {};
+          const viewText = seed.down_line_samples ? '2-view capture' : seed.face_on_samples ? 'face-on only' : 'manual capture';
+          const reviewed = item.ai_review ? ' | AI review ready' : '';
+          return `<div class="camera-capture-pill"><strong>Swing ${index + 1}</strong> - ${fit.target_cpm.toFixed(1)} CPM, ${item.derived_inputs.transition} transition, ${item.payload.motion_quality}/100 quality<br><small>${escapeFitText(viewText + reviewed)}</small></div>`;
         }).join('');
       }
     }
 
+    function buildCapturedSwingAiReview(captures) {
+      if (!captures.length) {
+        return {
+          verdict: 'No captured swings yet.',
+          findings: ['Capture at least one face-on and down-line swing before asking for review.'],
+          next_actions: ['Start cameras, capture a swing, then run AI review.'],
+          boundary: 'AI review needs captured swing context before it can help the fitter.'
+        };
+      }
+      const primary = captures[0];
+      const payload = primary.payload || {};
+      const seed = payload.camera_review_seed || {};
+      const inputs = primary.derived_inputs || {};
+      const findings = [];
+      const nextActions = [];
+
+      if (seed.face_on_samples) {
+        findings.push(`Face-on view captured ${seed.face_on_samples} motion samples for setup, tempo, pressure shift, and shaft load clues.`);
+      } else {
+        findings.push('Face-on view is missing; setup/load/tempo review is limited.');
+        nextActions.push('Capture a face-on view before locking shaft load or tempo conclusions.');
+      }
+
+      if (seed.down_line_samples) {
+        findings.push(`Down-line view captured ${seed.down_line_samples} motion samples for plane, path, hand path, and delivery clues.`);
+      } else {
+        findings.push('Down-line view is missing; path/plane/delivery review is limited.');
+        nextActions.push('Capture a down-line view before blaming shaft profile for path or face delivery.');
+      }
+
+      if (inputs.transition === 'Hard') {
+        findings.push('Transition read is hard; check whether the shaft is being overloaded from the top or if the player is rushing sequence.');
+        nextActions.push('Validate transition with face-on load timing before adding tip or mid stiffness.');
+      }
+      if (inputs.release === 'Early') {
+        nextActions.push('Review face-on release timing and impact pattern before softening the tip.');
+      }
+      if (inputs.release === 'Late') {
+        nextActions.push('Review down-line delivery and closure rate before adding anti-left stiffness.');
+      }
+      if (inputs.miss === 'Right') {
+        nextActions.push('Use down-line path plus face-on release timing to separate path issue from shaft release issue.');
+      }
+      if (inputs.miss === 'Left') {
+        nextActions.push('Check closure rate and handle load before reducing torque or stiffening tip.');
+      }
+      if (Number(payload.motion_quality || 0) < 60) {
+        findings.push('Motion quality is low; treat this as a direction finder, not a final build decision.');
+        nextActions.push('Capture two cleaner swings before sending the result to CAD.');
+      }
+
+      if (!nextActions.length) {
+        nextActions.push('Use the current shaft target as a prototype starting point and validate with impact pattern, launch, spin, and player feel.');
+      }
+
+      return {
+        verdict: `${captures.length} captured swing${captures.length === 1 ? '' : 's'} reviewed; ${seed.down_line_samples && seed.face_on_samples ? 'two-view review ready' : 'review limited by missing camera angle'}.`,
+        findings,
+        next_actions: nextActions,
+        boundary: 'AI review is a fitting direction read; validate with actual video, impact marks, launch data, and player feedback.'
+      };
+    }
+
+    function aiReviewCapturedSwings(button) {
+      flashButton(button, 'Reviewed');
+      const review = buildCapturedSwingAiReview(cameraCaptures);
+      if (latestCameraSwingProfile) latestCameraSwingProfile.ai_review = review;
+      cameraCaptures = cameraCaptures.map((item, index) => index === 0 ? {...item, ai_review: review} : item);
+      renderCameraFitResult();
+      setCameraState(`AI review ready: ${review.verdict}`);
+    }
+
     async function startCameraFit(button) {
       flashButton(button, 'Starting');
-      const video = document.getElementById('cameraVideo');
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         updateCameraHud('Unavailable', 'Manual mode');
         setCameraState('Browser camera unavailable; manual swing mode is ready.', true);
         return;
       }
       try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-        video.srcObject = cameraStream;
-        await video.play();
-        updateCameraHud('Live', 'Ready');
-        setCameraState('Camera live. Capture a swing when ready.');
+        const devices = navigator.mediaDevices.enumerateDevices ? await navigator.mediaDevices.enumerateDevices() : [];
+        const videoInputs = devices.filter(device => device.kind === 'videoinput');
+        const faceConstraints = videoInputs[0]?.deviceId ? {deviceId: {exact: videoInputs[0].deviceId}} : {facingMode: 'user'};
+        const downLineConstraints = videoInputs[1]?.deviceId ? {deviceId: {exact: videoInputs[1].deviceId}} : {facingMode: 'environment'};
+        cameraStreams.face = await navigator.mediaDevices.getUserMedia({ video: faceConstraints, audio: false });
+        try {
+          cameraStreams.downLine = await navigator.mediaDevices.getUserMedia({ video: downLineConstraints, audio: false });
+        } catch (secondError) {
+          cameraStreams.downLine = null;
+        }
+        cameraStream = cameraStreams.face;
+        const faceVideo = document.getElementById('cameraVideoFace');
+        const downLineVideo = document.getElementById('cameraVideoDownLine');
+        if (faceVideo && cameraStreams.face) {
+          faceVideo.srcObject = cameraStreams.face;
+          await faceVideo.play();
+        }
+        if (downLineVideo && cameraStreams.downLine) {
+          downLineVideo.srcObject = cameraStreams.downLine;
+          await downLineVideo.play();
+        }
+        updateCameraHud(cameraStreams.downLine ? '2 cameras' : '1 camera', 'Ready');
+        setCameraState(cameraStreams.downLine ? 'Face-on and down-line cameras live. Capture a swing when ready.' : 'Face-on camera live. Down-line camera unavailable; capture still works with limited review.');
       } catch (error) {
         updateCameraHud('Blocked', 'Manual mode');
         setCameraState(`Camera blocked: ${error.message || String(error)}. Manual swing mode is ready.`, true);
@@ -4994,20 +5142,24 @@ def home() -> str:
       flashButton(button, 'Stopped');
       if (cameraSampleTimer) window.clearInterval(cameraSampleTimer);
       cameraSampleTimer = null;
-      if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+      Object.values(cameraStreams).filter(Boolean).forEach(stream => stream.getTracks().forEach(track => track.stop()));
+      cameraStreams = {face: null, downLine: null};
       cameraStream = null;
       cameraPreviousBrightness = null;
-      const video = document.getElementById('cameraVideo');
-      if (video) video.srcObject = null;
+      cameraPreviousBrightnessByView = {face: null, downLine: null};
+      ['cameraVideoFace', 'cameraVideoDownLine'].forEach(id => {
+        const video = document.getElementById(id);
+        if (video) video.srcObject = null;
+      });
       updateCameraHud('Off', 'Idle');
-      setCameraState('Camera stopped.');
+      setCameraState('Cameras stopped.');
     }
 
-    function sampleCameraMotion() {
-      const video = document.getElementById('cameraVideo');
-      const canvas = document.getElementById('cameraSampleCanvas');
-      const meter = document.getElementById('cameraMotionMeter');
-      if (!video || !canvas || video.readyState < 2) return;
+    function sampleSingleCameraMotion(viewKey, videoId, canvasId, meterId) {
+      const video = document.getElementById(videoId);
+      const canvas = document.getElementById(canvasId);
+      const meter = document.getElementById(meterId);
+      if (!video || !canvas || video.readyState < 2) return null;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -5016,25 +5168,41 @@ def home() -> str:
         brightness += (data[i] + data[i + 1] + data[i + 2]) / 3;
       }
       brightness = brightness / (data.length / 16);
-      const motion = cameraPreviousBrightness == null ? 0 : Math.abs(brightness - cameraPreviousBrightness);
-      cameraPreviousBrightness = brightness;
-      cameraMotionSamples.push(motion);
+      const previous = cameraPreviousBrightnessByView[viewKey];
+      const motion = previous == null ? 0 : Math.abs(brightness - previous);
+      cameraPreviousBrightnessByView[viewKey] = brightness;
+      cameraMotionSamplesByView[viewKey].push(motion);
       if (meter) meter.style.width = `${Math.max(4, Math.min(100, motion * 6))}%`;
+      return motion;
+    }
+
+    function sampleCameraMotion() {
+      const faceMotion = sampleSingleCameraMotion('face', 'cameraVideoFace', 'cameraSampleCanvasFace', 'cameraMotionMeterFace');
+      const downLineMotion = sampleSingleCameraMotion('downLine', 'cameraVideoDownLine', 'cameraSampleCanvasDownLine', 'cameraMotionMeterDownLine');
+      const motions = [faceMotion, downLineMotion].filter(value => value != null);
+      if (motions.length) {
+        const combinedMotion = Math.max(...motions);
+        cameraPreviousBrightness = combinedMotion;
+        cameraMotionSamples.push(combinedMotion);
+      }
     }
 
     function startCameraSwingCapture(button) {
       flashButton(button, 'Capturing');
+      const hasLiveCamera = Boolean(cameraStreams.face || cameraStreams.downLine);
       cameraMotionSamples = [];
+      cameraMotionSamplesByView = {face: [], downLine: []};
       cameraPreviousBrightness = null;
-      updateCameraHud(cameraStream ? 'Live' : 'Manual', 'Capturing');
+      cameraPreviousBrightnessByView = {face: null, downLine: null};
+      updateCameraHud(hasLiveCamera ? (cameraStreams.downLine ? '2 cameras' : '1 camera') : 'Manual', 'Capturing');
       setCameraState('Capturing swing window.');
       if (cameraSampleTimer) window.clearInterval(cameraSampleTimer);
       cameraSampleTimer = window.setInterval(sampleCameraMotion, 180);
       window.setTimeout(() => {
         if (cameraSampleTimer) window.clearInterval(cameraSampleTimer);
         cameraSampleTimer = null;
-        const profile = buildSwingFitFromPayload(cameraStream ? deriveCameraPayloadFromSamples() : cameraManualPayload('manual-no-camera', 50, 65));
-        updateCameraHud(cameraStream ? 'Live' : 'Manual', 'Analyzed');
+        const profile = buildSwingFitFromPayload(hasLiveCamera ? deriveCameraPayloadFromSamples() : cameraManualPayload('manual-no-camera', 50, 65));
+        updateCameraHud(hasLiveCamera ? (cameraStreams.downLine ? '2 cameras' : '1 camera') : 'Manual', 'Analyzed');
         setCameraState(`Swing analyzed: ${profile.fit_target.target_cpm.toFixed(1)} CPM target generated.`);
       }, 5400);
     }
@@ -5042,7 +5210,7 @@ def home() -> str:
     function analyzeManualSwing(button) {
       flashButton(button, 'Analyzed');
       const profile = buildSwingFitFromPayload(cameraManualPayload('manual-entry', 50, 72));
-      updateCameraHud(cameraStream ? 'Live' : 'Manual', 'Analyzed');
+      updateCameraHud((cameraStreams.face || cameraStreams.downLine) ? 'Live' : 'Manual', 'Analyzed');
       setCameraState(`Manual swing analyzed: ${profile.fit_target.target_cpm.toFixed(1)} CPM target generated.`);
     }
 
@@ -8216,6 +8384,7 @@ method = "${document.getElementById('method').value}"`
         materialImportBtn: () => document.getElementById('materialFile')?.click(),
         cameraStartBtn: button => startCameraFit(button),
         cameraCaptureBtn: button => startCameraSwingCapture(button),
+        cameraAiReviewBtn: button => aiReviewCapturedSwings(button),
         cameraStopBtn: button => stopCameraFit(button),
         cameraManualBtn: button => analyzeManualSwing(button),
         cameraToFitBtn: button => sendCameraToFit(button),
@@ -8372,6 +8541,7 @@ method = "${document.getElementById('method').value}"`
     window.run = run;
     window.startCameraFit = startCameraFit;
     window.startCameraSwingCapture = startCameraSwingCapture;
+    window.aiReviewCapturedSwings = aiReviewCapturedSwings;
     window.stopCameraFit = stopCameraFit;
     window.analyzeManualSwing = analyzeManualSwing;
     window.sendCameraToFit = sendCameraToFit;
