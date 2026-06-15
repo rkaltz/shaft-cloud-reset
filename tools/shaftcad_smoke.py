@@ -31,6 +31,16 @@ def main_check() -> None:
         "raw model CPM should preserve unclamped simulation value",
     )
     require(len(design["behavior_intelligence"]["cpm_values"]) == 8, "behavior profile should include butt plus 7 stations")
+    require("shaft inner diameter stations" in design["gcode"], "mandrel G-code should be based on shaft ID")
+    require("segment[\"id_mm\"]" in design["cadquery_step_recipe"], "STEP recipe should generate mandrel from ID stations")
+
+    handoff = design["manufacturer_handoff"]
+    require(handoff["readiness_level"] == "prototype_quote_and_first_article", "handoff readiness level drifted")
+    require(handoff["mandrel_geometry"]["basis"] == "shaft inner diameter stations", "handoff mandrel basis is wrong")
+    require(len(handoff["ply_schedule"]) >= 16, "handoff ply schedule is too thin")
+    require(len(handoff["flag_templates"]) >= 16, "handoff flag template schedule is missing")
+    require("finished_cpm" in handoff["tolerances"], "handoff CPM tolerance is missing")
+    require(len(handoff["qc_checklist"]) >= 8, "handoff QC checklist is incomplete")
 
     fit = main.fit_target_from_swing(
         speed_mph=112.0,
@@ -42,6 +52,9 @@ def main_check() -> None:
     require(fit["builder_brief"]["recommended_material"] == "Toray M40J", "hard-transition material recommendation drifted")
     require(fit["builder_brief"]["recommended_architecture"] == "braid_tape_braid", "hard-transition architecture drifted")
     require(fit["cad_translation"]["bias_pair_deg"][0] == fit["wrap_angle_deg"], "Fit/CAD wrap transfer mismatch")
+
+    direct_handoff = main.api_manufacturing_handoff()
+    require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")
 
     print("AE ShaftCAD smoke checks passed")
 

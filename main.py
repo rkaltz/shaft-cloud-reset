@@ -725,15 +725,15 @@ def generate_mandrel_gcode(
         f"T{tool_number} M06 ; mandrel turning / contour tool",
         f"S{spindle_rpm} M03 ; spindle on clockwise",
         f"G0 X0.000 Z0.000 F{rapid_feed:.1f}",
-        "; Golf shaft tapered mandrel envelope",
+        "; Golf shaft tapered mandrel core based on shaft inner diameter stations",
     ]
     z_pos = 0.0
     for index, segment in enumerate(segments, start=1):
-        start_radius = segment.outer_diameter_m * radius_scale
+        start_radius = segment.inner_diameter_m * radius_scale
         z_next = z_pos + segment.length_m * linear_scale
-        end_radius = segment.outer_diameter_m * radius_scale
+        end_radius = segment.inner_diameter_m * radius_scale
         if index < len(segments):
-            end_radius = segments[index].outer_diameter_m * radius_scale
+            end_radius = segments[index].inner_diameter_m * radius_scale
         lines.extend([f"; Segment {index}: {segment.name}", f"G0 Z{z_pos:.3f} F{rapid_feed:.1f}"])
         for pass_index in range(1, pass_count + 1):
             stock_allowance = (pass_count - pass_index) * (0.08 if not use_inches else 0.003)
@@ -806,8 +806,20 @@ def make_shaft_envelope():
 
 
 def make_mandrel_core():
-    """Create a solid tapered mandrel core using the same OD stations."""
-    return make_shaft_envelope()
+    """Create a solid tapered mandrel core from shaft ID stations."""
+    z = 0.0
+    work = cq.Workplane("XY")
+
+    for index, segment in enumerate(SEGMENTS):
+        radius = segment["id_mm"] / 2.0
+        work = work.workplane(offset=z).circle(radius)
+        z += segment["length_mm"]
+
+        if index == len(SEGMENTS) - 1:
+            final_radius = segment["id_mm"] / 2.0
+            work = work.workplane(offset=z).circle(final_radius)
+
+    return work.loft(combine=True)
 
 
 if __name__ == "__main__":
@@ -816,6 +828,208 @@ if __name__ == "__main__":
     cq.exporters.export(make_mandrel_core(), "shaftcad_mandrel_core.step")
     print("Exported shaftcad_shaft_envelope.step and shaftcad_mandrel_core.step")
 '''
+
+
+def mandrel_station_table(segments: list[Segment]) -> list[dict[str, float | str]]:
+    rows: list[dict[str, float | str]] = []
+    z_mm = 0.0
+    for segment in segments:
+        rows.append(
+            {
+                "station": f"{segment.name} start",
+                "z_mm": round(z_mm, 3),
+                "shaft_od_mm": round(segment.outer_diameter_m * 1000.0, 3),
+                "mandrel_od_mm": round(segment.inner_diameter_m * 1000.0, 3),
+            }
+        )
+        z_mm += segment.length_m * 1000.0
+    last = segments[-1]
+    rows.append(
+        {
+            "station": f"{last.name} end",
+            "z_mm": round(z_mm, 3),
+            "shaft_od_mm": round(last.outer_diameter_m * 1000.0, 3),
+            "mandrel_od_mm": round(last.inner_diameter_m * 1000.0, 3),
+        }
+    )
+    return rows
+
+
+def ply_schedule(
+    segments: list[Segment],
+    material: Material,
+    architecture_key: str,
+    wrap_angle_deg: float,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    order = 1
+    for segment in segments:
+        for ply_index, ply in enumerate(segment.layup, start=1):
+            purpose = "axial EI / CPM stability" if abs(ply.angle_deg) < 1 else "bias torsion and recovery"
+            if abs(abs(ply.angle_deg) - 90.0) < 1:
+                purpose = "hoop crush support"
+            rows.append(
+                {
+                    "order": order,
+                    "zone": segment.name,
+                    "ply": ply_index,
+                    "material": material.name,
+                    "fiber_angle_deg": round(ply.angle_deg, 2),
+                    "thickness_mm": round(ply.thickness_m * 1000.0, 4),
+                    "purpose": purpose,
+                    "architecture": architecture_key,
+                    "note": "Prototype schedule; confirm exact prepreg areal weight and resin system with manufacturer.",
+                }
+            )
+            order += 1
+    if architecture_key in {"tubular_braid", "braid_tape_braid"}:
+        rows.append(
+            {
+                "order": order,
+                "zone": "Full length",
+                "ply": "braid sleeve",
+                "material": material.name,
+                "fiber_angle_deg": round(wrap_angle_deg, 2),
+                "thickness_mm": 0.08,
+                "purpose": "balanced +/- braid sleeve for torsion symmetry",
+                "architecture": architecture_key,
+                "note": "Sleeve angle is a manufacturing target; supplier must set carrier count and pick count.",
+            }
+        )
+    return rows
+
+
+def flag_template_schedule(segments: list[Segment], wrap_angle_deg: float) -> list[dict[str, Any]]:
+    templates: list[dict[str, Any]] = []
+    z_mm = 0.0
+    layer_specs = [
+        ("axial", 0.0, 1.0),
+        ("bias_plus", wrap_angle_deg, 0.62),
+        ("bias_minus", -wrap_angle_deg, 0.62),
+        ("hoop_support", 90.0, 0.38),
+    ]
+    for index, segment in enumerate(segments):
+        length_mm = segment.length_m * 1000.0
+        root_circumference = pi * segment.outer_diameter_m * 1000.0
+        next_segment = segments[index + 1] if index + 1 < len(segments) else segment
+        tip_circumference = pi * next_segment.outer_diameter_m * 1000.0
+        for name, angle, coverage in layer_specs:
+            templates.append(
+                {
+                    "id": f"{segment.name.lower().replace(' ', '_')}_{name}",
+                    "zone": segment.name,
+                    "start_z_mm": round(z_mm, 3),
+                    "end_z_mm": round(z_mm + length_mm, 3),
+                    "flat_pattern_length_mm": round(length_mm, 3),
+                    "root_wrap_width_mm": round(root_circumference * coverage, 3),
+                    "tip_wrap_width_mm": round(tip_circumference * coverage, 3),
+                    "fiber_angle_deg": round(angle, 2),
+                    "ply_thickness_mm": 0.125,
+                    "seam_clock_deg": 180 if "minus" in name else 0,
+                    "cut_file_layer": name,
+                }
+            )
+        z_mm += length_mm
+    return templates
+
+
+def build_manufacturer_handoff(
+    segments: list[Segment],
+    material: Material,
+    method_key: str,
+    method: dict[str, Any],
+    architecture_key: str,
+    architecture: dict[str, Any],
+    wrap_angle_deg: float,
+    target_cpm: float,
+    overall_cpm_value: float,
+    zones: list[dict[str, float]],
+    torsion_value: float,
+    behavior: dict[str, Any],
+    gcode: str,
+    step_recipe: str,
+) -> dict[str, Any]:
+    capped_zones = [zone for zone in zones if bool(zone.get("analyzer_limited"))]
+    warnings = [
+        "Prototype handoff only; manufacturer must validate laminate, resin, cure cycle, sanding allowance, and destructive test samples.",
+        "Material properties are engineering estimates unless replaced by supplier datasheets.",
+    ]
+    if capped_zones:
+        warnings.append("One or more CPM stations hit the 0-999 Auditor display cap; use raw_model_cpm only as simulation context.")
+    return {
+        "package": "AE ShaftCAD Manufacturer Handoff Pack",
+        "readiness_level": "prototype_quote_and_first_article",
+        "design_intent": {
+            "target_cpm": round(target_cpm, 2),
+            "predicted_cpm": round(overall_cpm_value, 2),
+            "cpm_error": round(overall_cpm_value - target_cpm, 2),
+            "torsion_deg_at_15nm": round(torsion_value, 3),
+            "architecture": architecture_key,
+            "manufacturing_method": method_key,
+            "material": material.name,
+            "behavior_summary": behavior.get("fingerprint", {}),
+        },
+        "mandrel_geometry": {
+            "basis": "shaft inner diameter stations",
+            "total_length_mm": round(total_length(segments) * 1000.0, 3),
+            "stations": mandrel_station_table(segments),
+        },
+        "shaft_envelope": {
+            "basis": "finished outer diameter stations before paint/sanding allowance",
+            "segments": [
+                {
+                    "name": segment.name,
+                    "length_mm": round(segment.length_m * 1000.0, 3),
+                    "outer_diameter_mm": round(segment.outer_diameter_m * 1000.0, 3),
+                    "inner_diameter_mm": round(segment.inner_diameter_m * 1000.0, 3),
+                    "nominal_wall_mm": round((segment.outer_diameter_m - segment.inner_diameter_m) * 500.0, 3),
+                }
+                for segment in segments
+            ],
+        },
+        "ply_schedule": ply_schedule(segments, material, architecture_key, wrap_angle_deg),
+        "flag_templates": flag_template_schedule(segments, wrap_angle_deg),
+        "exports": {
+            "mandrel_gcode": gcode,
+            "cadquery_step_recipe": step_recipe,
+            "required_cut_exports": ["flag_template_dxf", "flag_template_svg", "ply_schedule_json"],
+        },
+        "tolerances": {
+            "mandrel_od_mm": "+/-0.03 prototype, tighten after first article",
+            "flag_length_mm": "+/-0.50",
+            "flag_width_mm": "+/-0.25",
+            "fiber_angle_deg": "+/-1.0",
+            "raw_weight_g": "+/-1.5",
+            "finished_cpm": "+/-3 CPM overall, +/-5 CPM station profile",
+            "torque_deg": "+/-0.2 deg after process is locked",
+        },
+        "qc_checklist": [
+            "Verify mandrel station diameters before layup.",
+            "Confirm prepreg material, ply thickness, resin system, and shelf life.",
+            "Cut axial, bias, and hoop/support flags from the exported templates.",
+            "Clock seams away from each other through the stack.",
+            "Record raw layup weight before cure.",
+            "Cure using manufacturer-approved prepreg cycle.",
+            "Measure finished OD, weight, balance point, straightness, torque, and 7-zone CPM.",
+            "Hit-test launch, spin, start line, and miss tendency before changing more than one variable.",
+        ],
+        "revision_loop": [
+            "If overall CPM is high, reduce wall/thickness scale or soften axial material first.",
+            "If tip CPM/launch is too stiff, reduce tip hoop density before weakening handle stability.",
+            "If torque is too loose, increase bias/braid support before adding full-length mass.",
+            "If feel is harsh, localize high-modulus carbon and add damping veil/glass/aramid selectively.",
+        ],
+        "warnings": warnings,
+        "manufacturer_question_list": [
+            "What prepreg systems and ply thicknesses are available?",
+            "Can the shop cut DXF/SVG flag templates directly?",
+            "What mandrel tolerance and taper resolution can be held?",
+            "What cure cycle, shrink tape, sanding, and paint allowance should be modeled?",
+            "What first-article QC data can be returned for model calibration?",
+        ],
+        "architecture_note": architecture.get("cad_role", ""),
+        "method_note": method.get("note", ""),
+    }
 
 
 def analyze_shaft(
@@ -873,6 +1087,33 @@ def analyze_shaft(
     zones = zone_profile(segments, material, calibration)
     fatigue = fatigue_cycles()
     behavior = behavior_intelligence(cpm, zones, torsion, head_speed_mph)
+    gcode = generate_mandrel_gcode(
+        segments,
+        units=gcode_units,
+        rapid_feed=gcode_rapid_feed,
+        cut_feed=gcode_cut_feed,
+        spin_feed=gcode_spin_feed,
+        spindle_rpm=gcode_spindle_rpm,
+        tool_number=gcode_tool_number,
+        pass_count=gcode_pass_count,
+    )
+    step_recipe = generate_cadquery_step_recipe(segments)
+    manufacturer_handoff = build_manufacturer_handoff(
+        segments,
+        material,
+        method_key,
+        method,
+        architecture_mode,
+        architecture,
+        wrap_angle_deg,
+        target_cpm,
+        cpm,
+        zones,
+        torsion,
+        behavior,
+        gcode,
+        step_recipe,
+    )
     return {
         "inputs": {
             "target_cpm": target_cpm,
@@ -926,17 +1167,9 @@ def analyze_shaft(
         },
         "launch_simulation": simulate_launch(cpm, head_speed_mph),
         "behavior_intelligence": behavior,
-        "gcode": generate_mandrel_gcode(
-            segments,
-            units=gcode_units,
-            rapid_feed=gcode_rapid_feed,
-            cut_feed=gcode_cut_feed,
-            spin_feed=gcode_spin_feed,
-            spindle_rpm=gcode_spindle_rpm,
-            tool_number=gcode_tool_number,
-            pass_count=gcode_pass_count,
-        ),
-        "cadquery_step_recipe": generate_cadquery_step_recipe(segments),
+        "gcode": gcode,
+        "cadquery_step_recipe": step_recipe,
+        "manufacturer_handoff": manufacturer_handoff,
         "doe_sweep": doe_sweep(cpm, target_cpm),
         "wrapping_angle_optimization": wrapping_angle_sweep(target_cpm),
         "manufacturing_method": method,
@@ -993,7 +1226,7 @@ def home() -> str:
     .quick-start span { display: block; color: #50615e; font-size: 13px; line-height: 1.35; }
     .primary-actions { position: sticky; top: 0; z-index: 3; background: #f8fbfa; border: 1px solid #cbd8d5; border-radius: 8px; padding: 10px; margin-top: 14px; box-shadow: 0 8px 18px rgba(23, 33, 31, 0.08); }
     .primary-actions button { margin-top: 8px; }
-    .primary-actions .secondary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .primary-actions .secondary-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     details.control-group { border: 1px solid #cbd8d5; border-radius: 8px; background: #ffffff; margin-top: 12px; overflow: hidden; }
     details.control-group summary { cursor: pointer; padding: 11px 12px; font-weight: 800; color: #17211f; background: #eef5f3; }
     details.control-group .control-body { padding: 0 12px 12px; }
@@ -1185,6 +1418,7 @@ def home() -> str:
         <div class="secondary-row">
           <button id="exportJsonBtn" class="secondary" onclick="downloadJson(this)">Export JSON</button>
           <button id="exportGcodeBtn" class="secondary" onclick="downloadGcode(this)">Export G-Code</button>
+          <button id="exportMfgPackBtn" class="secondary" onclick="downloadManufacturerPack(this)">Export MFG Pack</button>
         </div>
       </div>
       <details class="control-group">
@@ -6051,6 +6285,20 @@ method = "${document.getElementById('method').value}"`
       URL.revokeObjectURL(url);
     }
 
+    function downloadManufacturerPack(button) {
+      if (!ensureExportReady('Manufacturer handoff export', true)) return;
+      flashButton(button, 'Exported');
+      const pack = latest?.manufacturer_handoff || {};
+      const blob = new Blob([JSON.stringify(pack, null, 2)], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ae-shaftcad-manufacturer-handoff.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      writeCadConsole('Exported manufacturer handoff package.');
+    }
+
     function safeInvoke(name, callback) {
       debugState.lastAction = name;
       renderDebugHealth();
@@ -6097,6 +6345,7 @@ method = "${document.getElementById('method').value}"`
         debugAuditBtn: button => runButtonAudit(button),
         exportJsonBtn: button => downloadJson(button),
         exportGcodeBtn: button => downloadGcode(button),
+        exportMfgPackBtn: button => downloadManufacturerPack(button),
         materialAddBtn: button => addMaterial(button),
         materialDuplicateBtn: button => duplicateSelectedMaterial(button),
         materialDeleteBtn: button => deleteSelectedMaterial(button),
@@ -6320,6 +6569,7 @@ method = "${document.getElementById('method').value}"`
     window.downloadCadScript = downloadCadScript;
     window.downloadJson = downloadJson;
     window.downloadGcode = downloadGcode;
+    window.downloadManufacturerPack = downloadManufacturerPack;
     window.undoDesignHistory = undoDesignHistory;
     window.redoDesignHistory = redoDesignHistory;
     window.setStrictMode = setStrictMode;
@@ -6462,6 +6712,28 @@ def api_gcode(
             pass_count=gcode_pass_count,
         )
     }
+
+
+@app.get("/api/manufacturing-handoff")
+def api_manufacturing_handoff(
+    target_cpm: float = 255.0,
+    head_weight_g: float = 205.0,
+    material_name: str = "Mitsubishi MR70",
+    method_key: str = "roll_wrapped",
+    wrap_angle_deg: float = 45.0,
+    architecture_mode: str = "flag_wrap",
+    head_speed_mph: float = 105.0,
+) -> dict[str, Any]:
+    analysis = analyze_shaft(
+        target_cpm=target_cpm,
+        head_weight_g=head_weight_g,
+        material_name=material_name,
+        method_key=method_key,
+        wrap_angle_deg=wrap_angle_deg,
+        architecture_mode=architecture_mode,
+        head_speed_mph=head_speed_mph,
+    )
+    return analysis["manufacturer_handoff"]
 
 
 @app.get("/api/cadquery-step-recipe")
