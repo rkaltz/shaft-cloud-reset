@@ -24,6 +24,12 @@ def main_check() -> None:
 
     design = main.analyze_shaft()
     require(math.isfinite(design["overall_cpm"]), "overall CPM is not finite")
+    spec = design["driver_shaft_spec_check"]
+    require(spec["fit_for_driver_baseline"], f"default driver shaft spec drifted: {spec['flags']}")
+    require(abs(spec["raw_length_in"] - 46.0) < 0.05, "default raw driver shaft length should be 46 inches")
+    require(abs(spec["tip_od_in"] - 0.335) < 0.003, "default driver tip OD should be 0.335 inch")
+    require(0.590 <= spec["butt_od_in"] <= 0.600, "default driver butt OD should be 0.590-0.600 inch")
+    require(45.0 <= spec["mass_g"] <= 85.0, "default driver shaft mass should be in the common 45-85g range")
     require(0.0 <= design["zone_profile"][-1]["cpm"] <= 999.0, "11-inch CPM exceeds Auditor range")
     require(design["zone_profile"][-1]["analyzer_limited"], "11-inch overflow is not flagged")
     require(
@@ -36,6 +42,7 @@ def main_check() -> None:
 
     handoff = design["manufacturer_handoff"]
     require(handoff["readiness_level"] == "prototype_quote_and_first_article", "handoff readiness level drifted")
+    require(handoff["driver_shaft_spec_check"]["fit_for_driver_baseline"], "handoff lost driver shaft spec validation")
     require(handoff["mandrel_geometry"]["basis"] == "shaft inner diameter stations", "handoff mandrel basis is wrong")
     require(len(handoff["ply_schedule"]) >= 16, "handoff ply schedule is too thin")
     require(len(handoff["flag_templates"]) >= 16, "handoff flag template schedule is missing")

@@ -15,6 +15,13 @@ APP_VERSION = "1.2"
 APP_BUILD_TIME = datetime.now(timezone.utc).isoformat()
 APP_BUILD_COMMIT = os.getenv("RENDER_GIT_COMMIT", "local-dev")
 
+INCH_TO_M = 0.0254
+RAW_DRIVER_LENGTH_RANGE_IN = (46.0, 47.0)
+STANDARD_PLAYING_LENGTH_RANGE_IN = (45.0, 45.75)
+STANDARD_DRIVER_TIP_OD_IN = 0.335
+STANDARD_DRIVER_BUTT_OD_RANGE_IN = (0.590, 0.600)
+STANDARD_DRIVER_WEIGHT_RANGE_G = (45.0, 85.0)
+
 
 @dataclass
 class Material:
@@ -174,10 +181,10 @@ def default_segments(base_angle: float = 45.0, thickness_m: float = 0.000125) ->
         Ply(0.0, thickness_m),
     ]
     return [
-        Segment("Butt", 0.254, 0.0150, 0.0130, layup.copy()),
-        Segment("Upper mid", 0.254, 0.0130, 0.0110, layup.copy()),
-        Segment("Lower mid", 0.254, 0.0110, 0.0090, layup.copy()),
-        Segment("Tip", 0.254, 0.0090, 0.0070, layup.copy()),
+        Segment("Butt", 0.2921, 0.600 * INCH_TO_M, 0.520 * INCH_TO_M, layup.copy()),
+        Segment("Upper mid", 0.2921, 0.540 * INCH_TO_M, 0.460 * INCH_TO_M, layup.copy()),
+        Segment("Lower mid", 0.2921, 0.430 * INCH_TO_M, 0.350 * INCH_TO_M, layup.copy()),
+        Segment("Tip", 0.2921, STANDARD_DRIVER_TIP_OD_IN * INCH_TO_M, 0.255 * INCH_TO_M, layup.copy()),
     ]
 
 
@@ -229,6 +236,45 @@ def shaft_mass_kg(segments: list[Segment], material: Material) -> float:
         pi * (s.outer_diameter_m**2 - s.inner_diameter_m**2) / 4.0 * s.length_m * material.density_kg_m3
         for s in segments
     )
+
+
+def driver_shaft_spec_check(segments: list[Segment], mass_g: float) -> dict[str, Any]:
+    raw_length_in = total_length(segments) / INCH_TO_M
+    butt_od_in = segments[0].outer_diameter_m / INCH_TO_M
+    tip_od_in = segments[-1].outer_diameter_m / INCH_TO_M
+    flags: list[str] = []
+    if not (RAW_DRIVER_LENGTH_RANGE_IN[0] <= raw_length_in <= RAW_DRIVER_LENGTH_RANGE_IN[1]):
+        flags.append("Raw driver shaft length should normally be 46-47 inches before trimming.")
+    if abs(tip_od_in - STANDARD_DRIVER_TIP_OD_IN) > 0.003:
+        flags.append("Driver/wood graphite tip OD should normally target 0.335 inch.")
+    if not (STANDARD_DRIVER_BUTT_OD_RANGE_IN[0] <= butt_od_in <= STANDARD_DRIVER_BUTT_OD_RANGE_IN[1]):
+        flags.append("Men's driver butt OD should normally sit around 0.590-0.600 inch.")
+    if not (STANDARD_DRIVER_WEIGHT_RANGE_G[0] <= mass_g <= STANDARD_DRIVER_WEIGHT_RANGE_G[1]):
+        flags.append("Modeled shaft mass is outside the common 45-85g driver shaft range.")
+    return {
+        "category": "composite_driver_shaft",
+        "raw_length_in": round(raw_length_in, 3),
+        "common_raw_length_in": {"min": RAW_DRIVER_LENGTH_RANGE_IN[0], "max": RAW_DRIVER_LENGTH_RANGE_IN[1]},
+        "common_playing_length_in": {
+            "min": STANDARD_PLAYING_LENGTH_RANGE_IN[0],
+            "max": STANDARD_PLAYING_LENGTH_RANGE_IN[1],
+            "note": "Playing length depends on head, adapter, trimming, and grip build.",
+        },
+        "tip_od_in": round(tip_od_in, 4),
+        "standard_tip_od_in": STANDARD_DRIVER_TIP_OD_IN,
+        "butt_od_in": round(butt_od_in, 4),
+        "standard_butt_od_in": {
+            "min": STANDARD_DRIVER_BUTT_OD_RANGE_IN[0],
+            "max": STANDARD_DRIVER_BUTT_OD_RANGE_IN[1],
+        },
+        "mass_g": round(mass_g, 2),
+        "common_weight_range_g": {
+            "min": STANDARD_DRIVER_WEIGHT_RANGE_G[0],
+            "max": STANDARD_DRIVER_WEIGHT_RANGE_G[1],
+        },
+        "fit_for_driver_baseline": not flags,
+        "flags": flags,
+    }
 
 
 def cpm_effective_length_m(total_length_m: float, clamp_length_in: float) -> float:
@@ -948,6 +994,7 @@ def build_manufacturer_handoff(
     behavior: dict[str, Any],
     gcode: str,
     step_recipe: str,
+    driver_spec_check: dict[str, Any],
 ) -> dict[str, Any]:
     capped_zones = [zone for zone in zones if bool(zone.get("analyzer_limited"))]
     warnings = [
@@ -956,6 +1003,7 @@ def build_manufacturer_handoff(
     ]
     if capped_zones:
         warnings.append("One or more CPM stations hit the 0-999 Auditor display cap; use raw_model_cpm only as simulation context.")
+    warnings.extend(driver_spec_check.get("flags", []))
     return {
         "package": "AE ShaftCAD Manufacturer Handoff Pack",
         "readiness_level": "prototype_quote_and_first_article",
@@ -969,6 +1017,7 @@ def build_manufacturer_handoff(
             "material": material.name,
             "behavior_summary": behavior.get("fingerprint", {}),
         },
+        "driver_shaft_spec_check": driver_spec_check,
         "mandrel_geometry": {
             "basis": "shaft inner diameter stations",
             "total_length_mm": round(total_length(segments) * 1000.0, 3),
@@ -1087,6 +1136,7 @@ def analyze_shaft(
     zones = zone_profile(segments, material, calibration)
     fatigue = fatigue_cycles()
     behavior = behavior_intelligence(cpm, zones, torsion, head_speed_mph)
+    driver_spec_check = driver_shaft_spec_check(segments, mass * 1000.0)
     gcode = generate_mandrel_gcode(
         segments,
         units=gcode_units,
@@ -1113,6 +1163,7 @@ def analyze_shaft(
         behavior,
         gcode,
         step_recipe,
+        driver_spec_check,
     )
     return {
         "inputs": {
@@ -1137,6 +1188,7 @@ def analyze_shaft(
         "overall_cpm": cpm,
         "cpm_error": cpm - target_cpm,
         "mass_g": mass * 1000.0,
+        "driver_shaft_spec_check": driver_spec_check,
         "material_cost_usd": cost,
         "tip_deflection_mm_100n": tip_deflection_mm(segments, material),
         "torsion_deflection_deg_15nm": torsion,

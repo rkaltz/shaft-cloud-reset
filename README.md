@@ -37,6 +37,7 @@ Open the Render URL without `/docs`.
 
 AE ShaftCAD now exports a prototype manufacturer handoff pack from the AI shaft designer. The pack includes:
 
+- driver-shaft reality checks for 46-47 inch raw length, 0.335 inch tip OD, 0.590-0.600 inch butt OD, and common 45-85g weight range
 - shaft ID-based mandrel geometry stations
 - finished shaft OD envelope
 - prototype ply schedule
@@ -51,5 +52,5 @@ This is a prototype quote and first-article package, not a final production trav
 
 ## Smoke Check
 
-Run `python tools/shaftcad_smoke.py` to verify the AI Shaft Builder Brief, Fit/CAD handoff, CPM analyzer caps, behavior profile, ID-based mandrel export, and manufacturer handoff still work after changes.
+Run `python tools/shaftcad_smoke.py` to verify the AI Shaft Builder Brief, Fit/CAD handoff, driver-shaft spec guardrails, CPM analyzer caps, behavior profile, ID-based mandrel export, and manufacturer handoff still work after changes.
 
