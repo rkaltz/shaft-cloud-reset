@@ -804,6 +804,83 @@ def shaft_reference_matches(speed_mph: float, tempo: str, transition: str, miss:
     return sorted(matches, key=lambda item: item["match_score"], reverse=True)[:3]
 
 
+def diy_driver_tuneup(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate face-impact and DIY fitting observations into next fitting moves."""
+
+    impact_pattern = str(payload.get("impact_pattern", "unknown") or "unknown").lower()
+    vertical_impact = str(payload.get("vertical_impact", "unknown") or "unknown").lower()
+    head_weight_feel = str(payload.get("head_weight_feel", "unknown") or "unknown").lower()
+    current_length = float(payload.get("current_length_in", 45.5) or 45.5)
+    gripped_down = float(payload.get("gripped_down_in", 0.0) or 0.0)
+    pw_shaft_weight = float(payload.get("pw_shaft_weight_g", 120.0) or 120.0)
+    added_head_weight = float(payload.get("added_head_weight_g", 0.0) or 0.0)
+
+    effective_length = max(42.0, current_length - gripped_down)
+    recommended_driver_shaft_weight = max(45.0, min(85.0, pw_shaft_weight * 0.5))
+    actions: list[str] = []
+    warnings: list[str] = []
+    lead_tape_plan: list[str] = []
+    shaft_notes: list[str] = []
+
+    if impact_pattern in {"heel", "heel side", "all over", "scattered"}:
+        actions.append("Test shorter playing length before cutting: grip down in 0.5 inch steps and mark the grip with tape.")
+        actions.append("Retest impact marks until the strike pattern moves out of heel/scattered contact toward center-to-slight-toe.")
+    elif impact_pattern in {"toe", "toe side"}:
+        actions.append("Toe-side impact may mean the club is too short, but first check whether total/head weight is too high for the player.")
+        warnings.append("Toe impact can be a player response to excessive weight, not only a length problem.")
+    elif impact_pattern in {"ideal", "upper toe", "smiley"}:
+        actions.append("Length is near the maximum useful range. Preserve this length unless launch/spin or dispersion proves otherwise.")
+    else:
+        actions.append("Start with face impact marks. The shaft builder should not guess before strike location is known.")
+
+    if vertical_impact in {"low", "below center", "below vcog"}:
+        actions.append("Raise tee height after length is stable; low-face contact generally adds spin.")
+    elif vertical_impact in {"high", "above vcog", "too high"}:
+        actions.append("Lower tee height slightly if impact is too high; above-center can cut spin, but too high costs ball speed.")
+    elif vertical_impact in {"upper toe", "ideal"}:
+        actions.append("Target upper-toe / slightly above-center contact: it can add launch and reduce spin without giving up smash.")
+
+    if head_weight_feel in {"light", "too light"}:
+        lead_tape_plan.append("Add lead tape one stripe at a time, blind-test feel and impact, then dial back from clearly too much.")
+    elif head_weight_feel in {"heavy", "too heavy"}:
+        lead_tape_plan.append("Reduce added head weight or test a lighter build before blaming shaft flex.")
+        warnings.append("If the player starts pulling the club, excessive total/head weight can move impact opposite the expected direction.")
+    else:
+        lead_tape_plan.append("Use lead tape only after length/tee are controlled; avoid chasing swing-weight numbers.")
+
+    lead_tape_plan.extend(
+        [
+            "Test nine sole positions: front/center/back crossed with heel/center/toe.",
+            "Front sole tends to reduce dynamic loft and increases gear-effect influence.",
+            "Back sole adds MOI/dynamic loft and reduces gear-effect severity.",
+            "Toe placement biases fade; heel placement biases draw; center is neutral.",
+            "Crown placement can raise VCOG and add spin compared with sole placement.",
+        ]
+    )
+
+    shaft_notes.append(
+        f"Driver shaft weight starting point from PW rule: about {recommended_driver_shaft_weight:.0f} g uncut if the PW shaft is {pw_shaft_weight:.0f} g."
+    )
+    shaft_notes.append("Simulate higher shaft/total weight by adding tape near the shaft balance point, not randomly on the head.")
+    shaft_notes.append("Do not cut until tape-shorter and lead-tape tests show the direction is repeatable.")
+    if added_head_weight > 0:
+        shaft_notes.append(f"With {added_head_weight:.1f} g added head weight, check manufacturer tip-trim guidance; common driver rule is roughly 1/8 inch per 2.5 g, but graphite varies.")
+    shaft_notes.append("Graphite wood tip trimming changes launch/tip behavior more than it changes flex; do not expect tip trim to turn R into S.")
+
+    return {
+        "effective_test_length_in": effective_length,
+        "recommended_driver_shaft_weight_g": recommended_driver_shaft_weight,
+        "impact_pattern": impact_pattern,
+        "vertical_impact": vertical_impact,
+        "head_weight_feel": head_weight_feel,
+        "actions": actions,
+        "lead_tape_plan": lead_tape_plan,
+        "shaft_notes": shaft_notes,
+        "warnings": warnings,
+        "boundary": "This is a fitting workflow guide. Use strike pattern, feel, and launch monitor proof before changing CAD or cutting a shaft.",
+    }
+
+
 def manufacturing_zones(fit: dict[str, Any], swing: dict[str, Any]) -> list[dict[str, Any]]:
     transition = fit["inputs"]["transition"]
     release = fit["inputs"]["release"]
@@ -916,6 +993,7 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
         "Store prototype results in the shaft database before declaring the recipe proven.",
     ]
     fit["shaft_database_matches"] = shaft_reference_matches(speed_mph, tempo, transition, miss)
+    fit["diy_driver_tuneup"] = diy_driver_tuneup(payload)
     return fit
 
 
@@ -1873,6 +1951,13 @@ def home() -> str:
               <div><label>Face-to-Path (deg)</label><input id="cameraFacePath" type="number" value="0" step="0.1"></div>
               <div><label>Shaft Load Index</label><input id="cameraShaftLoad" type="number" value="55" step="1" min="0" max="100"></div>
               <div><label>Hand Path</label><select id="cameraHandPath"><option selected>neutral</option><option>in-to-out</option><option>out-to-in</option><option>vertical</option><option>shallow</option></select></div>
+              <div><label>Impact Pattern</label><select id="cameraImpactPattern"><option selected>unknown</option><option>heel</option><option>all over</option><option>toe</option><option>ideal</option><option>upper toe</option></select></div>
+              <div><label>Vertical Impact</label><select id="cameraVerticalImpact"><option selected>unknown</option><option>low</option><option>center</option><option>upper toe</option><option>high</option></select></div>
+              <div><label>Head Weight Feel</label><select id="cameraHeadWeightFeel"><option selected>unknown</option><option>light</option><option>good</option><option>heavy</option></select></div>
+              <div><label>Current Driver Length</label><input id="cameraCurrentLength" type="number" value="45.5" step="0.25"></div>
+              <div><label>Gripped Down Test</label><input id="cameraGrippedDown" type="number" value="0" step="0.25"></div>
+              <div><label>PW Shaft Weight (g)</label><input id="cameraPwWeight" type="number" value="120" step="1"></div>
+              <div><label>Added Head Weight (g)</label><input id="cameraAddedHeadWeight" type="number" value="0" step="0.5"></div>
               <div><label>Launch (deg)</label><input id="cameraLaunch" type="number" value="13.5" step="0.1"></div>
               <div><label>Spin (rpm)</label><input id="cameraSpin" type="number" value="2650" step="10"></div>
               <div><label>Target Weight (g)</label><input id="cameraWeight" type="number" value="65" step="1"></div>
@@ -1896,6 +1981,10 @@ def home() -> str:
               <div class="camera-section-card">
                 <h4>Proof Before Trust</h4>
                 <ul id="cameraProofList"><li>No proof checklist yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>DIY Driver Tune-Up</h4>
+                <ul id="cameraTuneupList"><li>No tune-up plan yet.</li></ul>
               </div>
               <div class="camera-section-card camera-wide-card">
                 <h4>Starter Shaft Database Matches</h4>
@@ -3570,6 +3659,13 @@ def home() -> str:
         face_to_path_deg: cameraNumber('cameraFacePath', 0),
         shaft_load_index: cameraNumber('cameraShaftLoad', cameraNumber('cameraTransitionLoad', 55)),
         hand_path: document.getElementById('cameraHandPath')?.value || 'neutral',
+        impact_pattern: document.getElementById('cameraImpactPattern')?.value || 'unknown',
+        vertical_impact: document.getElementById('cameraVerticalImpact')?.value || 'unknown',
+        head_weight_feel: document.getElementById('cameraHeadWeightFeel')?.value || 'unknown',
+        current_length_in: cameraNumber('cameraCurrentLength', 45.5),
+        gripped_down_in: cameraNumber('cameraGrippedDown', 0),
+        pw_shaft_weight_g: cameraNumber('cameraPwWeight', 120),
+        added_head_weight_g: cameraNumber('cameraAddedHeadWeight', 0),
         launch_deg: cameraNumber('cameraLaunch', 13.5),
         spin_rpm: cameraNumber('cameraSpin', 2650),
         weight_g: cameraNumber('cameraWeight', 65),
@@ -3610,6 +3706,7 @@ def home() -> str:
     }
 
     function enrichCameraFitProfile(profile, payload, inputs) {
+      const diyTuneup = buildDiyDriverTuneup(payload);
       const why = [
         `${Number(payload.speed_mph).toFixed(0)} mph speed sets the base stiffness and weight class.`,
         `${inputs.tempo} tempo with ${inputs.transition} transition drives the handle/mid stability target.`,
@@ -3647,13 +3744,64 @@ def home() -> str:
       profile.manufacturing_zones = zones;
       profile.proof_requirements = [
         'Capture at least three clean swings before trusting the camera profile.',
+        'Capture face impact marks with dry-erase marker or foot spray before changing length or CAD.',
         'Compare the generated 7-zone CPM target against the measured shaft after build.',
         'Validate launch, spin, start line, and face delivery on a launch monitor.',
         'Change one build variable at a time so the database learns what actually moved performance.',
         'Store prototype results in the shaft database before declaring the recipe proven.'
       ];
       profile.shaft_database_matches = cameraReferenceMatches(payload, inputs);
+      profile.diy_driver_tuneup = diyTuneup;
       return profile;
+    }
+
+    function buildDiyDriverTuneup(payload) {
+      const impact = String(payload.impact_pattern || 'unknown').toLowerCase();
+      const vertical = String(payload.vertical_impact || 'unknown').toLowerCase();
+      const headFeel = String(payload.head_weight_feel || 'unknown').toLowerCase();
+      const effectiveLength = Math.max(42, Number(payload.current_length_in || 45.5) - Number(payload.gripped_down_in || 0));
+      const driverWeight = Math.max(45, Math.min(85, Number(payload.pw_shaft_weight_g || 120) * 0.5));
+      const actions = [];
+      const leadTapePlan = [];
+      const shaftNotes = [];
+      const warnings = [];
+
+      if (impact === 'heel' || impact === 'all over') {
+        actions.push('Test shorter playing length before cutting: grip down in 0.5 inch steps and mark the grip with tape.');
+        actions.push('Retest impact marks until strike moves toward center-to-slight-toe.');
+      } else if (impact === 'toe') {
+        actions.push('Toe-side impact may mean too short, but first check whether total/head weight is too high.');
+        warnings.push('Toe impact can be a player response to excessive weight, not only a length problem.');
+      } else if (impact === 'ideal' || impact === 'upper toe') {
+        actions.push('Length is near the maximum useful range. Preserve it unless launch/spin or dispersion proves otherwise.');
+      } else {
+        actions.push('Start with impact marks. The shaft builder should not guess before strike location is known.');
+      }
+
+      if (vertical === 'low') actions.push('Raise tee height after length is stable; low-face contact generally adds spin.');
+      if (vertical === 'high') actions.push('Lower tee height slightly if impact is too high; above-center can cut spin, but too high costs ball speed.');
+      if (vertical === 'upper toe') actions.push('Target upper-toe / slightly above-center contact for strong ball speed and controlled spin.');
+
+      if (headFeel === 'light') {
+        leadTapePlan.push('Add lead tape one stripe at a time, blind-test feel and impact, then dial back from clearly too much.');
+      } else if (headFeel === 'heavy') {
+        leadTapePlan.push('Reduce added head weight or test a lighter build before blaming shaft flex.');
+        warnings.push('Excessive total/head weight can make the player pull the club and move impact opposite the expected direction.');
+      } else {
+        leadTapePlan.push('Use lead tape only after length/tee are controlled; avoid chasing swing-weight numbers.');
+      }
+      leadTapePlan.push('Test nine sole positions: front/center/back crossed with heel/center/toe.');
+      leadTapePlan.push('Front sole lowers dynamic loft influence; back sole adds MOI/dynamic loft; toe biases fade; heel biases draw.');
+
+      shaftNotes.push(`Effective test length is ${effectiveLength.toFixed(2)} inches.`);
+      shaftNotes.push(`PW rule suggests about ${driverWeight.toFixed(0)} g uncut driver shaft if PW shaft is ${Number(payload.pw_shaft_weight_g || 120).toFixed(0)} g.`);
+      shaftNotes.push('Simulate higher shaft/total weight by adding tape near the shaft balance point.');
+      shaftNotes.push('Do not cut until tape-shorter and lead-tape tests repeat.');
+      if (Number(payload.added_head_weight_g || 0) > 0) {
+        shaftNotes.push('Added head weight may require manufacturer tip-trim review; graphite tip trim changes launch/tip behavior more than flex.');
+      }
+
+      return {effective_test_length_in: effectiveLength, recommended_driver_shaft_weight_g: driverWeight, actions, lead_tape_plan: leadTapePlan, shaft_notes: shaftNotes, warnings};
     }
 
     function buildSwingFitFromPayload(payload) {
@@ -3699,6 +3847,7 @@ def home() -> str:
       const whyList = document.getElementById('cameraWhyList');
       const zoneList = document.getElementById('cameraZoneList');
       const proofList = document.getElementById('cameraProofList');
+      const tuneupList = document.getElementById('cameraTuneupList');
       const databaseList = document.getElementById('cameraDatabaseList');
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
@@ -3706,6 +3855,7 @@ def home() -> str:
         if (whyList) whyList.innerHTML = '<li>No fit explanation yet.</li>';
         if (zoneList) zoneList.innerHTML = '<li>No build zones yet.</li>';
         if (proofList) proofList.innerHTML = '<li>No proof checklist yet.</li>';
+        if (tuneupList) tuneupList.innerHTML = '<li>No tune-up plan yet.</li>';
         if (databaseList) databaseList.innerHTML = '<li>No comparable shafts yet.</li>';
       } else {
         const fit = latestCameraSwingProfile.fit_target;
@@ -3732,6 +3882,16 @@ def home() -> str:
         }
         if (proofList) {
           proofList.innerHTML = (fit.proof_requirements || []).map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No proof checklist yet.</li>';
+        }
+        if (tuneupList) {
+          const tuneup = fit.diy_driver_tuneup || {};
+          const tuneupItems = [
+            ...(tuneup.actions || []),
+            ...(tuneup.lead_tape_plan || []),
+            ...(tuneup.shaft_notes || []),
+            ...(tuneup.warnings || []).map(item => `Warning: ${item}`)
+          ];
+          tuneupList.innerHTML = tuneupItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No tune-up plan yet.</li>';
         }
         if (databaseList) {
           databaseList.innerHTML = (fit.shaft_database_matches || []).map(item => `<li><strong>${escapeFitText(item.name)}</strong>: ${escapeFitText(item.profile)} (${item.match_score}/8 match)</li>`).join('') || '<li>No comparable shafts yet.</li>';
@@ -7437,6 +7597,11 @@ def api_fit_target(
 @app.post("/api/swing-to-shaft")
 def api_swing_to_shaft(payload: dict[str, Any]) -> dict[str, Any]:
     return swing_capture_to_fit(payload)
+
+
+@app.post("/api/diy-driver-tuneup")
+def api_diy_driver_tuneup(payload: dict[str, Any]) -> dict[str, Any]:
+    return diy_driver_tuneup(payload)
 
 
 @app.get("/api/fit-cad/bridge")

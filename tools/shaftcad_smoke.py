@@ -26,6 +26,8 @@ def main_check() -> None:
     require("cameraShaftLoad" in html, "Camera fitting shaft-load input is missing")
     require("Why This Shaft" in html, "Camera fitting explanation panel is missing")
     require("Manufacturing Zones" in html, "Camera fitting manufacturing zones panel is missing")
+    require("DIY Driver Tune-Up" in html, "DIY driver tune-up panel is missing")
+    require("cameraImpactPattern" in html, "DIY impact-pattern input is missing")
     require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
 
@@ -79,6 +81,13 @@ def main_check() -> None:
             "face_to_path_deg": 0.4,
             "shaft_load_index": 80.0,
             "hand_path": "shallow",
+            "impact_pattern": "heel",
+            "vertical_impact": "low",
+            "head_weight_feel": "light",
+            "current_length_in": 45.5,
+            "gripped_down_in": 0.5,
+            "pw_shaft_weight_g": 120.0,
+            "added_head_weight_g": 2.5,
             "launch_deg": 13.2,
             "spin_rpm": 2500.0,
             "motion_quality": 82.0,
@@ -92,7 +101,25 @@ def main_check() -> None:
     require(len(swing_fit["manufacturing_zones"]) >= 4, "camera swing manufacturing zones are incomplete")
     require(len(swing_fit["proof_requirements"]) >= 5, "camera swing proof checklist is incomplete")
     require(swing_fit["shaft_database_matches"], "camera swing database matches are missing")
+    require(swing_fit["diy_driver_tuneup"]["effective_test_length_in"] == 45.0, "DIY driver test length drifted")
+    require(
+        any("shorter playing length" in item for item in swing_fit["diy_driver_tuneup"]["actions"]),
+        "DIY driver tune-up did not react to heel impact",
+    )
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
+
+    tuneup = main.diy_driver_tuneup(
+        {
+            "impact_pattern": "toe",
+            "vertical_impact": "high",
+            "head_weight_feel": "heavy",
+            "current_length_in": 45.75,
+            "gripped_down_in": 0.25,
+            "pw_shaft_weight_g": 130.0,
+        }
+    )
+    require(tuneup["recommended_driver_shaft_weight_g"] == 65.0, "PW-to-driver shaft weight rule drifted")
+    require(tuneup["warnings"], "DIY tune-up should warn on toe/heavy combination")
 
     direct_handoff = main.api_manufacturing_handoff()
     require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")
