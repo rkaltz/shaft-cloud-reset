@@ -1289,6 +1289,72 @@ def wishon_profile_guard(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def fitting_interview_read(payload: dict[str, Any]) -> dict[str, Any]:
+    """Pre-fit interview summary from driver/iron fitting intake questions."""
+
+    interview = payload.get("fitting_interview") or {}
+    club_type = str(interview.get("club_type", "driver") or "driver").lower()
+    tendencies = [str(item).lower() for item in interview.get("poor_shot_tendencies", [])]
+    wants = [str(item).lower() for item in interview.get("personal_wants", [])]
+    pain = str(interview.get("physical_pain", "unknown") or "unknown").lower()
+    limitations = str(interview.get("physical_limitations", "unknown") or "unknown").lower()
+    confidence = str(interview.get("confidence", "unknown") or "unknown").lower()
+    weight_feel = str(interview.get("club_weight_feel", "unknown") or "unknown").lower()
+    goal = str(interview.get("immediate_goal", "unknown") or "unknown").lower()
+    handicap_trend = str(interview.get("handicap_trend", "unknown") or "unknown").lower()
+
+    start_points: list[str] = []
+    watch_items: list[str] = []
+    fitter_questions: list[str] = []
+
+    if pain == "yes" or limitations == "yes":
+        start_points.append("Start with comfort and repeatability before chasing speed.")
+        watch_items.append("Do not force heavy, long, or harsh builds until pain/limitation notes are understood.")
+        fitter_questions.append("Where does the swing hurt, and does it change through the round?")
+
+    if "slice" in tendencies or "stop slicing" in wants or "push right" in tendencies or "stop pushing" in wants:
+        start_points.append("Begin with face delivery, strike location, playing length, and release feel.")
+        watch_items.append("Right-miss pattern: avoid making the shaft so stiff/boardy the player cannot square it.")
+    if "hook" in tendencies or "stop hooking" in wants or "pull left" in tendencies or "stop pulling" in wants:
+        start_points.append("Begin with torque/profile stability, face angle, and left-bias control.")
+        watch_items.append("Left-miss pattern: check high-torque/light/soft combinations before adding loft or length.")
+    if "very inconsistent" in tendencies or "straight but unsolid hit" in tendencies or "more consistent" in wants or "drive the ball with more consistency" in wants:
+        start_points.append("Begin with center-contact controls: length, total weight, swingweight, and impact pattern.")
+    if "hit very low" in tendencies or "hit the ball higher" in wants:
+        start_points.append("Check launch window, dynamic loft, shaft tip response, and loft before changing flex label.")
+    if "sky it" in tendencies or "hit the ball lower" in wants:
+        start_points.append("Check impact height, attack angle, tee/ball position, and spin before stiffening everything.")
+    if "hit the ball longer" in wants:
+        start_points.append("Distance goal: protect contact quality first, then test speed, launch, and spin gains.")
+    if confidence == "no confidence":
+        watch_items.append("Low confidence: use smaller test changes and show the player clear cause/effect.")
+    if weight_feel == "too heavy":
+        start_points.append("Current club feels heavy: test lower total weight or shorter length before adding head weight.")
+    elif weight_feel == "too light":
+        start_points.append("Current club feels light: test more head/shaft weight and watch face control.")
+    if "find out" in goal:
+        fitter_questions.append("Is the goal validation of the current club, a rebuild, or a new shaft design?")
+    if handicap_trend == "going up":
+        watch_items.append("Handicap trending up: prioritize misses, confidence, and playable dispersion over max-distance claims.")
+
+    if club_type == "iron":
+        start_points.append("Iron path: include static length/lie, dynamic lie marks, shaft weight, and contact pattern early.")
+    else:
+        start_points.append("Driver path: include loft, face angle, playing length, strike height, and carry/roll proof early.")
+
+    if not start_points:
+        start_points.append("Start with baseline interview, current specs, impact marks, and three clean swings.")
+
+    return {
+        "club_type": club_type,
+        "start_points": start_points,
+        "watch_items": watch_items,
+        "fitter_questions": fitter_questions,
+        "source": "Maltby-style driver/iron personal fitting interview",
+        "captured": interview,
+    }
+
+
 def manufacturing_zones(fit: dict[str, Any], swing: dict[str, Any]) -> list[dict[str, Any]]:
     transition = fit["inputs"]["transition"]
     release = fit["inputs"]["release"]
@@ -1407,6 +1473,7 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     fit["static_length_lie"] = static_length_lie_fit(payload)
     fit["shaft_sensation_quality"] = shaft_sensation_quality_read(payload)
     fit["wishon_profile_guard"] = wishon_profile_guard(payload)
+    fit["fitting_interview"] = fitting_interview_read(payload)
     return fit
 
 
@@ -2006,6 +2073,11 @@ def home() -> str:
     .swing-meter span { display: block; height: 100%; width: 0%; background: #17695f; transition: width 160ms linear; }
     .camera-result { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 8px; padding: 12px; }
     .camera-result h3 { margin-top: 0; }
+    .interview-panel { border: 1px solid #cbd8d5; background: #f8fbfa; border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+    .interview-panel summary { cursor: pointer; font-weight: 800; color: #0d3f35; }
+    .interview-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; margin-top: 8px; }
+    .interview-checks label { display: flex; gap: 7px; align-items: center; margin: 0; font-weight: 500; font-size: 13px; }
+    .interview-checks input { width: auto; margin: 0; }
     .camera-capture-list { display: grid; gap: 7px; margin-top: 8px; }
     .camera-capture-pill { border: 1px solid #d9e4e1; background: #eef5f3; border-radius: 6px; padding: 8px; font-size: 13px; }
     .camera-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
@@ -2353,6 +2425,62 @@ def home() -> str:
             <div id="cameraCaptureList" class="camera-capture-list"></div>
           </div>
           <div class="camera-result">
+            <details class="interview-panel" open>
+              <summary>Pre-Fit Interview</summary>
+              <div class="mini-grid">
+                <div><label>Fitting Type</label><select id="interviewClubType"><option selected>driver</option><option>iron</option></select></div>
+                <div><label>Handedness</label><select id="interviewHandedness"><option selected>right-hand golfer</option><option>left-hand golfer</option></select></div>
+                <div><label>Years Playing</label><input id="interviewYearsPlaying" type="number" value="0" step="1"></div>
+                <div><label>Current Handicap</label><input id="interviewHandicap" type="text" value=""></div>
+                <div><label>Handicap Trend</label><select id="interviewHandicapTrend"><option selected>unknown</option><option>going up</option><option>going down</option><option>stable</option></select></div>
+                <div><label>Average Score</label><input id="interviewAverageScore" type="number" value="0" step="1"></div>
+                <div><label>Rounds Per Year</label><input id="interviewRoundsPerYear" type="number" value="0" step="1"></div>
+                <div><label>Lessons</label><select id="interviewLessons"><option selected>unknown</option><option>yes</option><option>no</option></select></div>
+                <div><label>Practice Before Playing</label><select id="interviewPracticeBefore"><option selected>sometimes</option><option>regularly</option><option>never</option></select></div>
+                <div><label>Practice Only Sessions</label><select id="interviewPracticeOnly"><option selected>sometimes</option><option>regularly</option><option>never</option></select></div>
+                <div><label>Physical Pain</label><select id="interviewPain"><option selected>unknown</option><option>yes</option><option>no</option></select></div>
+                <div><label>Other Limitations</label><select id="interviewLimitations"><option selected>unknown</option><option>yes</option><option>no</option></select></div>
+                <div><label>Confidence</label><select id="interviewConfidence"><option selected>some confidence</option><option>very confident</option><option>no confidence</option></select></div>
+                <div><label>Current Club Weight Feel</label><select id="interviewWeightFeel"><option selected>weight OK</option><option>too heavy</option><option>too light</option><option>don't know</option></select></div>
+                <div><label>Immediate Goal</label><select id="interviewImmediateGoal"><option selected>spend reasonable effort to improve</option><option>improve as rapidly as possible</option><option>little time but wants improvement</option><option>find out if current club is right</option></select></div>
+                <div><label>Future Handicap Goal</label><select id="interviewFutureGoal"><option selected>don't know</option><option>scratch handicap</option><option>low handicap</option><option>middle handicap</option><option>average golfer</option></select></div>
+              </div>
+              <label>Poor Shot Tendencies</label>
+              <div class="interview-checks" id="interviewTendencies">
+                <label><input type="checkbox" value="top it"> Top it</label>
+                <label><input type="checkbox" value="slice it right"> Slice it right</label>
+                <label><input type="checkbox" value="pull it left"> Pull it left</label>
+                <label><input type="checkbox" value="push it right"> Push it right</label>
+                <label><input type="checkbox" value="hit very low"> Hit very low</label>
+                <label><input type="checkbox" value="very inconsistent"> Very inconsistent</label>
+                <label><input type="checkbox" value="sky it"> Sky it</label>
+                <label><input type="checkbox" value="straight but unsolid hit"> Straight but unsolid</label>
+                <label><input type="checkbox" value="hook it left"> Hook it left</label>
+              </div>
+              <label>Personal Wants</label>
+              <div class="interview-checks" id="interviewWants">
+                <label><input type="checkbox" value="hit the ball higher"> Hit higher</label>
+                <label><input type="checkbox" value="hit the ball lower"> Hit lower</label>
+                <label><input type="checkbox" value="stop slicing"> Stop slicing</label>
+                <label><input type="checkbox" value="stop pushing"> Stop pushing</label>
+                <label><input type="checkbox" value="stop hooking"> Stop hooking</label>
+                <label><input type="checkbox" value="stop pulling"> Stop pulling</label>
+                <label><input type="checkbox" value="hit the ball straighter"> Hit straighter</label>
+                <label><input type="checkbox" value="hit the ball longer"> Hit longer</label>
+                <label><input type="checkbox" value="more consistent"> More consistent</label>
+              </div>
+              <div class="mini-grid">
+                <div><label>Current Brand</label><input id="interviewCurrentBrand" type="text" value=""></div>
+                <div><label>Current Model</label><input id="interviewCurrentModel" type="text" value=""></div>
+                <div><label>Driver Loft</label><input id="interviewDriverLoft" type="text" value=""></div>
+                <div><label>Playing Length</label><input id="interviewPlayingLength" type="text" value=""></div>
+                <div><label>Swingweight</label><input id="interviewSwingweight" type="text" value=""></div>
+                <div><label>Face Angle</label><select id="interviewFaceAngle"><option selected>unknown</option><option>open/slice</option><option>square</option><option>closed/hook</option></select></div>
+                <div><label>Grip Size</label><select id="interviewGripSize"><option selected>standard</option><option>1/64 undersize</option><option>1/64 oversize</option><option>1/32 oversize</option><option>other</option></select></div>
+                <div><label>Iron Head Preference</label><select id="interviewIronPreference"><option selected>unknown</option><option>blade style</option><option>cavity back - some game improvement</option><option>cavity back - all game improvement</option></select></div>
+              </div>
+              <label>Fitter Notes</label><textarea id="interviewNotes" rows="3" style="width:100%; box-sizing:border-box; margin-top:5px; border:1px solid #b9c8c4; border-radius:6px; padding:10px;"></textarea>
+            </details>
             <h3>Swing Inputs</h3>
             <div class="mini-grid">
               <div><label>Club Speed (mph)</label><input id="cameraSpeed" type="number" value="105" step="1"></div>
@@ -2402,6 +2530,10 @@ def home() -> str:
             <h3>AI Shaft Result</h3>
             <table><tbody id="cameraFitResult"></tbody></table>
             <div class="camera-section-grid">
+              <div class="camera-section-card camera-wide-card">
+                <h4>Fitter Starting Direction</h4>
+                <ul id="cameraInterviewList"><li>No interview direction yet.</li></ul>
+              </div>
               <div class="camera-section-card camera-wide-card">
                 <h4>Why This Shaft</h4>
                 <ul id="cameraWhyList"><li>No fit explanation yet.</li></ul>
@@ -4111,6 +4243,46 @@ def home() -> str:
       return Number(document.getElementById(id)?.value || fallback);
     }
 
+    function cameraText(id) {
+      return document.getElementById(id)?.value || '';
+    }
+
+    function checkedValues(containerId) {
+      return Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)).map(input => input.value);
+    }
+
+    function fittingInterviewPayload() {
+      return {
+        club_type: document.getElementById('interviewClubType')?.value || 'driver',
+        handedness: document.getElementById('interviewHandedness')?.value || 'right-hand golfer',
+        years_playing: cameraNumber('interviewYearsPlaying', 0),
+        current_handicap: cameraText('interviewHandicap'),
+        handicap_trend: document.getElementById('interviewHandicapTrend')?.value || 'unknown',
+        average_score: cameraNumber('interviewAverageScore', 0),
+        rounds_per_year: cameraNumber('interviewRoundsPerYear', 0),
+        lessons: document.getElementById('interviewLessons')?.value || 'unknown',
+        practice_before_playing: document.getElementById('interviewPracticeBefore')?.value || 'sometimes',
+        practice_only_sessions: document.getElementById('interviewPracticeOnly')?.value || 'sometimes',
+        physical_pain: document.getElementById('interviewPain')?.value || 'unknown',
+        physical_limitations: document.getElementById('interviewLimitations')?.value || 'unknown',
+        confidence: document.getElementById('interviewConfidence')?.value || 'some confidence',
+        club_weight_feel: document.getElementById('interviewWeightFeel')?.value || 'weight OK',
+        immediate_goal: document.getElementById('interviewImmediateGoal')?.value || 'spend reasonable effort to improve',
+        future_handicap_goal: document.getElementById('interviewFutureGoal')?.value || "don't know",
+        poor_shot_tendencies: checkedValues('interviewTendencies'),
+        personal_wants: checkedValues('interviewWants'),
+        current_brand: cameraText('interviewCurrentBrand'),
+        current_model: cameraText('interviewCurrentModel'),
+        driver_loft: cameraText('interviewDriverLoft'),
+        playing_length: cameraText('interviewPlayingLength'),
+        swingweight: cameraText('interviewSwingweight'),
+        face_angle: document.getElementById('interviewFaceAngle')?.value || 'unknown',
+        grip_size: document.getElementById('interviewGripSize')?.value || 'standard',
+        iron_head_preference: document.getElementById('interviewIronPreference')?.value || 'unknown',
+        fitter_notes: cameraText('interviewNotes')
+      };
+    }
+
     function setCameraState(message, isBad) {
       const state = document.getElementById('cameraFitState');
       if (state) state.textContent = message;
@@ -4166,6 +4338,7 @@ def home() -> str:
         current_flex_label: document.getElementById('cameraCurrentFlex')?.value || 'unknown',
         current_shaft_weight_g: cameraNumber('cameraCurrentShaftWeight', 0),
         current_torque_deg: cameraNumber('cameraCurrentTorque', 0),
+        fitting_interview: fittingInterviewPayload(),
         weight_g: cameraNumber('cameraWeight', 65),
         motion_score: motionScore ?? 50,
         motion_quality: motionQuality ?? 70
@@ -4210,6 +4383,7 @@ def home() -> str:
       const staticFit = buildStaticLengthLieFit(payload);
       const sensationQuality = buildShaftSensationQuality(payload);
       const wishonGuard = buildWishonProfileGuard(payload);
+      const interviewRead = buildFittingInterviewRead(payload);
       const why = [
         `${Number(payload.speed_mph).toFixed(0)} mph speed sets the base stiffness and weight class.`,
         `${inputs.tempo} tempo with ${inputs.transition} transition drives the handle/mid stability target.`,
@@ -4260,7 +4434,65 @@ def home() -> str:
       profile.static_length_lie = staticFit;
       profile.shaft_sensation_quality = sensationQuality;
       profile.wishon_profile_guard = wishonGuard;
+      profile.fitting_interview = interviewRead;
       return profile;
+    }
+
+    function buildFittingInterviewRead(payload) {
+      const interview = payload.fitting_interview || {};
+      const clubType = String(interview.club_type || 'driver').toLowerCase();
+      const tendencies = (interview.poor_shot_tendencies || []).map(item => String(item).toLowerCase());
+      const wants = (interview.personal_wants || []).map(item => String(item).toLowerCase());
+      const pain = String(interview.physical_pain || 'unknown').toLowerCase();
+      const limitations = String(interview.physical_limitations || 'unknown').toLowerCase();
+      const confidence = String(interview.confidence || 'unknown').toLowerCase();
+      const weightFeel = String(interview.club_weight_feel || 'unknown').toLowerCase();
+      const goal = String(interview.immediate_goal || 'unknown').toLowerCase();
+      const handicapTrend = String(interview.handicap_trend || 'unknown').toLowerCase();
+      const startPoints = [];
+      const watchItems = [];
+      const fitterQuestions = [];
+      if (pain === 'yes' || limitations === 'yes') {
+        startPoints.push('Start with comfort and repeatability before chasing speed.');
+        watchItems.push('Do not force heavy, long, or harsh builds until pain/limitation notes are understood.');
+        fitterQuestions.push('Where does the swing hurt, and does it change through the round?');
+      }
+      if (tendencies.includes('slice it right') || wants.includes('stop slicing') || tendencies.includes('push it right') || wants.includes('stop pushing')) {
+        startPoints.push('Begin with face delivery, strike location, playing length, and release feel.');
+        watchItems.push('Right-miss pattern: avoid making the shaft so stiff/boardy the player cannot square it.');
+      }
+      if (tendencies.includes('hook it left') || wants.includes('stop hooking') || tendencies.includes('pull it left') || wants.includes('stop pulling')) {
+        startPoints.push('Begin with torque/profile stability, face angle, and left-bias control.');
+        watchItems.push('Left-miss pattern: check high-torque/light/soft combinations before adding loft or length.');
+      }
+      if (tendencies.includes('very inconsistent') || tendencies.includes('straight but unsolid hit') || wants.includes('more consistent') || wants.includes('drive the ball with more consistency')) {
+        startPoints.push('Begin with center-contact controls: length, total weight, swingweight, and impact pattern.');
+      }
+      if (tendencies.includes('hit very low') || wants.includes('hit the ball higher')) {
+        startPoints.push('Check launch window, dynamic loft, shaft tip response, and loft before changing flex label.');
+      }
+      if (tendencies.includes('sky it') || wants.includes('hit the ball lower')) {
+        startPoints.push('Check impact height, attack angle, tee/ball position, and spin before stiffening everything.');
+      }
+      if (wants.includes('hit the ball longer')) {
+        startPoints.push('Distance goal: protect contact quality first, then test speed, launch, and spin gains.');
+      }
+      if (confidence === 'no confidence') watchItems.push('Low confidence: use smaller test changes and show the player clear cause/effect.');
+      if (weightFeel === 'too heavy') startPoints.push('Current club feels heavy: test lower total weight or shorter length before adding head weight.');
+      if (weightFeel === 'too light') startPoints.push('Current club feels light: test more head/shaft weight and watch face control.');
+      if (goal.includes('find out')) fitterQuestions.push('Is the goal validation of the current club, a rebuild, or a new shaft design?');
+      if (handicapTrend === 'going up') watchItems.push('Handicap trending up: prioritize misses, confidence, and playable dispersion over max-distance claims.');
+      startPoints.push(clubType === 'iron'
+        ? 'Iron path: include static length/lie, dynamic lie marks, shaft weight, and contact pattern early.'
+        : 'Driver path: include loft, face angle, playing length, strike height, and carry/roll proof early.');
+      return {
+        club_type: clubType,
+        start_points: startPoints.length ? startPoints : ['Start with baseline interview, current specs, impact marks, and three clean swings.'],
+        watch_items: watchItems,
+        fitter_questions: fitterQuestions,
+        source: 'Maltby-style driver/iron personal fitting interview',
+        captured: interview
+      };
     }
 
     function buildWishonProfileGuard(payload) {
@@ -4598,6 +4830,7 @@ def home() -> str:
       const result = document.getElementById('cameraFitResult');
       const packet = document.getElementById('cameraPacket');
       const list = document.getElementById('cameraCaptureList');
+      const interviewList = document.getElementById('cameraInterviewList');
       const whyList = document.getElementById('cameraWhyList');
       const zoneList = document.getElementById('cameraZoneList');
       const proofList = document.getElementById('cameraProofList');
@@ -4611,6 +4844,7 @@ def home() -> str:
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
         if (packet) packet.textContent = 'No swing packet yet.';
+        if (interviewList) interviewList.innerHTML = '<li>No interview direction yet.</li>';
         if (whyList) whyList.innerHTML = '<li>No fit explanation yet.</li>';
         if (zoneList) zoneList.innerHTML = '<li>No build zones yet.</li>';
         if (proofList) proofList.innerHTML = '<li>No proof checklist yet.</li>';
@@ -4637,6 +4871,16 @@ def home() -> str:
             ['Miss Bias', inputs.miss],
             ['Confidence', latestCameraSwingProfile.payload.motion_quality + ' / 100']
           ].map(row => `<tr><td>${row[0]}</td><td>${escapeFitText(row[1])}</td></tr>`).join('');
+        }
+        if (interviewList) {
+          const interview = fit.fitting_interview || {};
+          const interviewItems = [
+            ...(interview.start_points || []),
+            ...(interview.watch_items || []).map(item => `Watch: ${item}`),
+            ...(interview.fitter_questions || []).map(item => `Ask: ${item}`),
+            interview.source ? `Source: ${interview.source}` : ''
+          ].filter(Boolean);
+          interviewList.innerHTML = interviewItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No interview direction yet.</li>';
         }
         if (whyList) {
           whyList.innerHTML = (fit.why_this_fit || []).map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No fit explanation yet.</li>';
@@ -8450,6 +8694,11 @@ def api_shaft_sensation_quality(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/wishon-profile-guard")
 def api_wishon_profile_guard(payload: dict[str, Any]) -> dict[str, Any]:
     return wishon_profile_guard(payload)
+
+
+@app.post("/api/fitting-interview")
+def api_fitting_interview(payload: dict[str, Any]) -> dict[str, Any]:
+    return fitting_interview_read(payload)
 
 
 @app.get("/api/fit-cad/bridge")

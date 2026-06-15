@@ -21,6 +21,10 @@ def main_check() -> None:
     html = main.home()
     require("AI Shaft Builder Brief" in html, "Fit-to-build UI is missing")
     require("Camera Fit" in html, "Camera fitting tab is missing")
+    require("Pre-Fit Interview" in html, "Pre-fit interview form is missing")
+    require("interviewClubType" in html, "Interview fitting type input is missing")
+    require("interviewTendencies" in html, "Interview tendencies checklist is missing")
+    require("Fitter Starting Direction" in html, "Fitter starting direction panel is missing")
     require("startCameraFit" in html, "Camera fitting controls are not wired")
     require("cameraAttackAngle" in html, "Camera fitting attack-angle input is missing")
     require("cameraShaftLoad" in html, "Camera fitting shaft-load input is missing")
@@ -134,6 +138,17 @@ def main_check() -> None:
             "current_flex_label": "S",
             "current_shaft_weight_g": 82.0,
             "current_torque_deg": 5.2,
+            "fitting_interview": {
+                "club_type": "driver",
+                "physical_pain": "yes",
+                "physical_limitations": "no",
+                "poor_shot_tendencies": ["slice it right", "very inconsistent"],
+                "personal_wants": ["hit the ball longer", "more consistent"],
+                "confidence": "no confidence",
+                "club_weight_feel": "too heavy",
+                "immediate_goal": "find out if current club is right",
+                "handicap_trend": "going up",
+            },
             "motion_quality": 82.0,
             "motion_score": 78.0,
         }
@@ -171,6 +186,14 @@ def main_check() -> None:
     require(
         any("7-point" in item for item in swing_fit["wishon_profile_guard"]["findings"]),
         "Wishon profile finding is missing",
+    )
+    require(
+        any("comfort and repeatability" in item for item in swing_fit["fitting_interview"]["start_points"]),
+        "Fitting interview did not react to pain/limitations",
+    )
+    require(
+        any("Driver path" in item for item in swing_fit["fitting_interview"]["start_points"]),
+        "Fitting interview did not add driver starting path",
     )
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
@@ -254,6 +277,22 @@ def main_check() -> None:
         any("0.5 inch" in item for item in wishon["trimming_notes"]),
         "Wishon trimming guidance is missing",
     )
+
+    interview = main.fitting_interview_read(
+        {
+            "fitting_interview": {
+                "club_type": "iron",
+                "physical_pain": "no",
+                "physical_limitations": "yes",
+                "poor_shot_tendencies": ["hook it left"],
+                "personal_wants": ["stop pulling"],
+                "club_weight_feel": "too light",
+            }
+        }
+    )
+    require(interview["club_type"] == "iron", "Fitting interview club type drifted")
+    require(any("Iron path" in item for item in interview["start_points"]), "Iron fitting interview path is missing")
+    require(any("left-bias control" in item for item in interview["start_points"]), "Interview missed left-miss starting direction")
 
     direct_handoff = main.api_manufacturing_handoff()
     require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")
