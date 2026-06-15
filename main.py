@@ -951,6 +951,99 @@ def visual_fitting_read(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def rollout_target_percent(speed_mph: float) -> float:
+    """Howard Jones style driver rollout target: faster players need lower rollout percentage."""
+
+    anchors = [(80.0, 13.0), (90.0, 12.0), (100.0, 11.0), (110.0, 10.0), (120.0, 9.0)]
+    if speed_mph <= anchors[0][0]:
+        return anchors[0][1]
+    if speed_mph >= anchors[-1][0]:
+        return anchors[-1][1]
+    for (speed_a, pct_a), (speed_b, pct_b) in zip(anchors, anchors[1:]):
+        if speed_a <= speed_mph <= speed_b:
+            ratio = (speed_mph - speed_a) / (speed_b - speed_a)
+            return pct_a + (pct_b - pct_a) * ratio
+    return 11.0
+
+
+def driver_launch_rollout_optimizer(payload: dict[str, Any]) -> dict[str, Any]:
+    """Judge driver launch/spin/loft direction from club speed, carry, rollout, and PW carry."""
+
+    speed_mph = float(payload.get("speed_mph", 105.0) or 105.0)
+    launch_deg = float(payload.get("launch_deg", 13.5) or 13.5)
+    attack_angle = float(payload.get("attack_angle_deg", 0.0) or 0.0)
+    carry_yards = float(payload.get("carry_yards", 0.0) or 0.0)
+    total_yards = float(payload.get("total_yards", 0.0) or 0.0)
+    pw_carry_yards = float(payload.get("pw_carry_yards", 0.0) or 0.0)
+    target_rollout_pct = rollout_target_percent(speed_mph)
+
+    actual_rollout_pct: float | None = None
+    rollout_read = "missing carry/total proof"
+    recommendations: list[str] = []
+    proof_steps: list[str] = []
+
+    if carry_yards > 0 and total_yards > carry_yards:
+        rollout_yards = total_yards - carry_yards
+        actual_rollout_pct = rollout_yards / total_yards * 100.0
+        delta = actual_rollout_pct - target_rollout_pct
+        if delta > 1.0:
+            rollout_read = "too much rollout for target carry/roll mix"
+            recommendations.append("Spin/launch window may be too low for the player; test more loft, higher launch, or more spin before changing shaft stiffness.")
+        elif delta < -1.0:
+            rollout_read = "not enough rollout for target carry/roll mix"
+            recommendations.append("Spin/launch window may be too high; test lower loft or spin control before blaming shaft weight.")
+        else:
+            rollout_read = "rollout is inside the target window"
+            recommendations.append("Carry/roll mix is near optimized for the measured club speed.")
+    else:
+        recommendations.append("Measure carry and total with laser/GPS or launch monitor to judge rollout percentage.")
+
+    if attack_angle >= 4.0 and launch_deg < 12.0:
+        recommendations.append("Positive attack angle with low launch points to insufficient dynamic loft or low-face strike, not necessarily a shaft problem.")
+    if attack_angle <= -2.0 and launch_deg > 15.0:
+        recommendations.append("Negative attack angle with high launch can still spin too much; verify strike height and spin before adding loft.")
+
+    pw_driver_carry_target: float | None = None
+    pw_read = "PW carry not provided"
+    if pw_carry_yards > 0:
+        pw_driver_carry_target = pw_carry_yards * 2.03
+        if carry_yards > 0:
+            carry_delta = carry_yards - pw_driver_carry_target
+            if carry_delta < -10.0:
+                pw_read = "driver carry is short versus PW relationship"
+                recommendations.append("Driver is underperforming relative to the PW reference; check impact, launch/spin, and playing length.")
+            elif carry_delta > 10.0:
+                pw_read = "driver carry is above PW relationship"
+                recommendations.append("Driver carry is strong relative to PW; verify PW is a good working reference before changing driver setup.")
+            else:
+                pw_read = "driver carry matches PW relationship"
+        else:
+            pw_read = "PW reference target calculated, driver carry missing"
+
+    proof_steps.extend(
+        [
+            "Use the same ball and normal course/range conditions when measuring carry and rollout.",
+            "Compare rollout percentage to the club-speed target before deciding loft/spin changes.",
+            "Use PW carry x 2.03 only when the PW is a good working reference club.",
+            "Separate ball-flight tuning from shaft-feel tuning: loft/head/ball often solve flight cleaner than shaft tip alone.",
+        ]
+    )
+
+    return {
+        "speed_mph": speed_mph,
+        "attack_angle_deg": attack_angle,
+        "launch_deg": launch_deg,
+        "target_rollout_pct": target_rollout_pct,
+        "actual_rollout_pct": actual_rollout_pct,
+        "rollout_read": rollout_read,
+        "pw_driver_carry_target": pw_driver_carry_target,
+        "pw_read": pw_read,
+        "recommendations": recommendations,
+        "proof_steps": proof_steps,
+        "boundary": "Rollout percentage assumes good rollout conditions. Wet turf, wind, slope, ball, and landing angle can distort the read.",
+    }
+
+
 def manufacturing_zones(fit: dict[str, Any], swing: dict[str, Any]) -> list[dict[str, Any]]:
     transition = fit["inputs"]["transition"]
     release = fit["inputs"]["release"]
@@ -1065,6 +1158,7 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     fit["shaft_database_matches"] = shaft_reference_matches(speed_mph, tempo, transition, miss)
     fit["diy_driver_tuneup"] = diy_driver_tuneup(payload)
     fit["visual_fitting"] = visual_fitting_read(payload)
+    fit["launch_rollout_optimizer"] = driver_launch_rollout_optimizer(payload)
     return fit
 
 
@@ -2037,6 +2131,9 @@ def home() -> str:
               <div><label>Power Leaks</label><select id="cameraVisualLeaks"><option selected>unknown</option><option>none</option><option>multiple bursts</option><option>sparks</option><option>leaking</option></select></div>
               <div><label>Launch (deg)</label><input id="cameraLaunch" type="number" value="13.5" step="0.1"></div>
               <div><label>Spin (rpm)</label><input id="cameraSpin" type="number" value="2650" step="10"></div>
+              <div><label>Carry (yd)</label><input id="cameraCarry" type="number" value="0" step="1"></div>
+              <div><label>Total (yd)</label><input id="cameraTotal" type="number" value="0" step="1"></div>
+              <div><label>PW Carry (yd)</label><input id="cameraPwCarry" type="number" value="0" step="1"></div>
               <div><label>Target Weight (g)</label><input id="cameraWeight" type="number" value="65" step="1"></div>
             </div>
             <div class="fit-actions">
@@ -2066,6 +2163,10 @@ def home() -> str:
               <div class="camera-section-card camera-wide-card">
                 <h4>Visual Fitting Read</h4>
                 <ul id="cameraVisualList"><li>No visual fitting read yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>Launch / Rollout Optimizer</h4>
+                <ul id="cameraRolloutList"><li>No launch/rollout read yet.</li></ul>
               </div>
               <div class="camera-section-card camera-wide-card">
                 <h4>Starter Shaft Database Matches</h4>
@@ -3755,6 +3856,9 @@ def home() -> str:
         visual_power_leaks: document.getElementById('cameraVisualLeaks')?.value || 'unknown',
         launch_deg: cameraNumber('cameraLaunch', 13.5),
         spin_rpm: cameraNumber('cameraSpin', 2650),
+        carry_yards: cameraNumber('cameraCarry', 0),
+        total_yards: cameraNumber('cameraTotal', 0),
+        pw_carry_yards: cameraNumber('cameraPwCarry', 0),
         weight_g: cameraNumber('cameraWeight', 65),
         motion_score: motionScore ?? 50,
         motion_quality: motionQuality ?? 70
@@ -3795,6 +3899,7 @@ def home() -> str:
     function enrichCameraFitProfile(profile, payload, inputs) {
       const diyTuneup = buildDiyDriverTuneup(payload);
       const visualFit = buildVisualFittingRead(payload);
+      const rolloutRead = buildLaunchRolloutRead(payload);
       const why = [
         `${Number(payload.speed_mph).toFixed(0)} mph speed sets the base stiffness and weight class.`,
         `${inputs.tempo} tempo with ${inputs.transition} transition drives the handle/mid stability target.`,
@@ -3841,7 +3946,70 @@ def home() -> str:
       profile.shaft_database_matches = cameraReferenceMatches(payload, inputs);
       profile.diy_driver_tuneup = diyTuneup;
       profile.visual_fitting = visualFit;
+      profile.launch_rollout_optimizer = rolloutRead;
       return profile;
+    }
+
+    function rolloutTargetPercent(speed) {
+      const clamped = Math.max(80, Math.min(120, Number(speed || 100)));
+      return 13 - ((clamped - 80) / 10);
+    }
+
+    function buildLaunchRolloutRead(payload) {
+      const speed = Number(payload.speed_mph || 105);
+      const target = rolloutTargetPercent(speed);
+      const carry = Number(payload.carry_yards || 0);
+      const total = Number(payload.total_yards || 0);
+      const pwCarry = Number(payload.pw_carry_yards || 0);
+      const recommendations = [];
+      let actual = null;
+      let rolloutRead = 'missing carry/total proof';
+      if (carry > 0 && total > carry) {
+        actual = ((total - carry) / total) * 100;
+        const delta = actual - target;
+        if (delta > 1) {
+          rolloutRead = 'too much rollout for target carry/roll mix';
+          recommendations.push('Spin/launch window may be too low; test more loft, higher launch, or more spin before changing shaft stiffness.');
+        } else if (delta < -1) {
+          rolloutRead = 'not enough rollout for target carry/roll mix';
+          recommendations.push('Spin/launch window may be too high; test lower loft or spin control before blaming shaft weight.');
+        } else {
+          rolloutRead = 'rollout is inside the target window';
+          recommendations.push('Carry/roll mix is near optimized for the measured club speed.');
+        }
+      } else {
+        recommendations.push('Measure carry and total with laser/GPS or launch monitor to judge rollout percentage.');
+      }
+      const pwTarget = pwCarry > 0 ? pwCarry * 2.03 : null;
+      let pwRead = 'PW carry not provided';
+      if (pwTarget && carry > 0) {
+        const carryDelta = carry - pwTarget;
+        if (carryDelta < -10) {
+          pwRead = 'driver carry is short versus PW relationship';
+          recommendations.push('Driver is underperforming relative to PW; check impact, launch/spin, and playing length.');
+        } else if (carryDelta > 10) {
+          pwRead = 'driver carry is above PW relationship';
+          recommendations.push('Driver carry is strong relative to PW; verify PW is a good working reference.');
+        } else {
+          pwRead = 'driver carry matches PW relationship';
+        }
+      } else if (pwTarget) {
+        pwRead = 'PW reference target calculated, driver carry missing';
+      }
+      return {
+        target_rollout_pct: target,
+        actual_rollout_pct: actual,
+        rollout_read: rolloutRead,
+        pw_driver_carry_target: pwTarget,
+        pw_read: pwRead,
+        recommendations,
+        proof_steps: [
+          'Use same ball and normal conditions when measuring carry and rollout.',
+          'Compare rollout percentage to the club-speed target before deciding loft/spin changes.',
+          'Use PW carry x 2.03 only when the PW is a good working reference club.',
+          'Separate ball-flight tuning from shaft-feel tuning.'
+        ]
+      };
     }
 
     function buildVisualFittingRead(payload) {
@@ -3991,6 +4159,7 @@ def home() -> str:
       const proofList = document.getElementById('cameraProofList');
       const tuneupList = document.getElementById('cameraTuneupList');
       const visualList = document.getElementById('cameraVisualList');
+      const rolloutList = document.getElementById('cameraRolloutList');
       const databaseList = document.getElementById('cameraDatabaseList');
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
@@ -4000,6 +4169,7 @@ def home() -> str:
         if (proofList) proofList.innerHTML = '<li>No proof checklist yet.</li>';
         if (tuneupList) tuneupList.innerHTML = '<li>No tune-up plan yet.</li>';
         if (visualList) visualList.innerHTML = '<li>No visual fitting read yet.</li>';
+        if (rolloutList) rolloutList.innerHTML = '<li>No launch/rollout read yet.</li>';
         if (databaseList) databaseList.innerHTML = '<li>No comparable shafts yet.</li>';
       } else {
         const fit = latestCameraSwingProfile.fit_target;
@@ -4046,6 +4216,19 @@ def home() -> str:
             ...(visual.warnings || []).map(item => `Rule: ${item}`)
           ];
           visualList.innerHTML = visualItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No visual fitting read yet.</li>';
+        }
+        if (rolloutList) {
+          const rollout = fit.launch_rollout_optimizer || {};
+          const rolloutItems = [
+            `Target rollout: ${Number(rollout.target_rollout_pct || 0).toFixed(1)}% of total.`,
+            rollout.actual_rollout_pct == null ? 'Actual rollout: not measured.' : `Actual rollout: ${Number(rollout.actual_rollout_pct).toFixed(1)}% of total.`,
+            `Read: ${rollout.rollout_read || 'No read yet.'}`,
+            rollout.pw_driver_carry_target == null ? 'PW target: not provided.' : `PW x 2.03 driver carry target: ${Number(rollout.pw_driver_carry_target).toFixed(0)} yd.`,
+            `PW read: ${rollout.pw_read || 'No PW read yet.'}`,
+            ...(rollout.recommendations || []),
+            ...(rollout.proof_steps || []).map(item => `Proof: ${item}`)
+          ];
+          rolloutList.innerHTML = rolloutItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No launch/rollout read yet.</li>';
         }
         if (databaseList) {
           databaseList.innerHTML = (fit.shaft_database_matches || []).map(item => `<li><strong>${escapeFitText(item.name)}</strong>: ${escapeFitText(item.profile)} (${item.match_score}/8 match)</li>`).join('') || '<li>No comparable shafts yet.</li>';
@@ -7761,6 +7944,11 @@ def api_diy_driver_tuneup(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/visual-fitting")
 def api_visual_fitting(payload: dict[str, Any]) -> dict[str, Any]:
     return visual_fitting_read(payload)
+
+
+@app.post("/api/launch-rollout")
+def api_launch_rollout(payload: dict[str, Any]) -> dict[str, Any]:
+    return driver_launch_rollout_optimizer(payload)
 
 
 @app.get("/api/fit-cad/bridge")

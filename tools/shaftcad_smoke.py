@@ -30,6 +30,8 @@ def main_check() -> None:
     require("cameraImpactPattern" in html, "DIY impact-pattern input is missing")
     require("Visual Fitting Read" in html, "Visual fitting panel is missing")
     require("cameraVisualTransition" in html, "Visual fitting transition input is missing")
+    require("Launch / Rollout Optimizer" in html, "Launch rollout optimizer panel is missing")
+    require("cameraPwCarry" in html, "PW carry input is missing")
     require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
 
@@ -98,6 +100,9 @@ def main_check() -> None:
             "visual_power_leaks": "sparks",
             "launch_deg": 13.2,
             "spin_rpm": 2500.0,
+            "carry_yards": 250.0,
+            "total_yards": 280.0,
+            "pw_carry_yards": 123.0,
             "motion_quality": 82.0,
             "motion_score": 78.0,
         }
@@ -118,6 +123,11 @@ def main_check() -> None:
     require(
         any("jump-start" in item for item in swing_fit["visual_fitting"]["diagnosis"]),
         "Visual fitting did not react to jump-start transition",
+    )
+    require(swing_fit["launch_rollout_optimizer"]["target_rollout_pct"] == 9.8, "Launch rollout speed target drifted")
+    require(
+        swing_fit["launch_rollout_optimizer"]["rollout_read"] == "rollout is inside the target window",
+        "Launch rollout optimizer did not classify measured carry/roll correctly",
     )
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
@@ -147,6 +157,18 @@ def main_check() -> None:
     require(len(visual["fitting_moves"]) >= 3, "Visual fitting moves are incomplete")
     require(any("more shaft weight" in item for item in visual["fitting_moves"]), "Visual fitting missed too-light/weak read")
     require(any("Lower shaft/total weight" in item for item in visual["fitting_moves"]), "Visual fitting missed total-weight upper limit")
+
+    rollout = main.driver_launch_rollout_optimizer(
+        {
+            "speed_mph": 100.0,
+            "carry_yards": 230.0,
+            "total_yards": 260.0,
+            "pw_carry_yards": 115.0,
+        }
+    )
+    require(rollout["target_rollout_pct"] == 11.0, "100 mph rollout target should be 11%")
+    require(rollout["actual_rollout_pct"] is not None, "rollout optimizer did not calculate actual rollout")
+    require(rollout["pw_driver_carry_target"] == 233.45, "PW carry relationship drifted")
 
     direct_handoff = main.api_manufacturing_handoff()
     require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")
