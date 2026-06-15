@@ -2064,6 +2064,21 @@ def home() -> str:
     .shaft-data-card { background: #ffffff; border: 1px solid #cbd8d5; border-radius: 8px; padding: 12px; }
     .shaft-data-card h3 { margin-top: 0; }
     .auditor-table input { margin: 0; padding: 8px; }
+    .auditor-table tr.active-capture { background: #fff4d6; outline: 2px solid #d9911f; }
+    .auditor-console { display: grid; grid-template-columns: 150px minmax(180px, 1fr) 170px; gap: 10px; align-items: end; background: #10231f; color: #d7fff6; border: 1px solid #17695f; border-radius: 8px; padding: 12px; margin: 10px 0 12px; }
+    .auditor-console label { color: #d7fff6; margin-top: 0; }
+    .auditor-console input { background: #f8fbfa; color: #17211f; font-size: 26px; font-weight: 900; text-align: center; padding: 12px; }
+    .auditor-console button { margin-top: 5px; }
+    .auditor-console .station-display { background: #d7fff6; color: #17211f; border-radius: 6px; padding: 12px; text-align: center; }
+    .auditor-console .station-display span { display: block; font-size: 11px; text-transform: uppercase; color: #50615e; font-weight: 800; }
+    .auditor-console .station-display strong { display: block; font-size: 32px; line-height: 1; margin-top: 4px; }
+    .auditor-console-help { margin: 0 0 10px; color: #50615e; font-size: 13px; line-height: 1.35; }
+    .auditor-capture-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 10px; }
+    .auditor-capture-actions button { margin-top: 0; }
+    .auditor-capture-status { margin: 0 0 8px; font-weight: 800; color: #17695f; }
+    .auditor-butt-field { display: grid; grid-template-columns: minmax(170px, 0.35fr) 1fr; gap: 10px; align-items: center; background: #eef5f3; border: 1px solid #cbd8d5; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+    .auditor-butt-field label { margin: 0; }
+    .auditor-butt-field input { margin: 0; font-weight: 900; }
     .auditor-table td, .auditor-table th { vertical-align: top; }
     .auditor-readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
     .auditor-readout .card { background: #eef5f3; border: 1px solid #cbd8d5; }
@@ -2443,6 +2458,27 @@ def home() -> str:
           </div>
           <div class="shaft-data-card">
             <h3>Auditor Frequency Analyzer Input</h3>
+            <div class="auditor-console" aria-label="Auditor quick capture console">
+              <div class="station-display">
+                <span id="auditorCaptureSection">Butt Frequency</span>
+                <strong id="auditorCaptureStation">Butt</strong>
+              </div>
+              <div>
+                <label for="auditorCaptureInput">CPM Reading</label>
+                <input id="auditorCaptureInput" type="number" min="0" max="999" step="0.1" inputmode="decimal" placeholder="Enter CPM">
+              </div>
+              <button id="auditorCaptureBtn">Capture + Next</button>
+            </div>
+            <p class="auditor-console-help">Auditor workflow: first capture the standalone butt frequency, then clamp through the 41 / 36 / 31 / 26 / 21 / 16 / 11 station profile. Type the displayed CPM and press Enter.</p>
+            <p class="auditor-capture-status" id="auditorCaptureStatus">Ready for butt frequency.</p>
+            <div class="auditor-capture-actions">
+              <button id="auditorBackBtn" class="secondary">Back Station</button>
+              <button id="auditorResetBtn" class="secondary">Reset Capture</button>
+            </div>
+            <div class="auditor-butt-field">
+              <label for="shaftButtFrequency">Standalone Butt Frequency</label>
+              <input id="shaftButtFrequency" data-capture-key="butt" type="number" min="0" max="999" step="0.1" value="" placeholder="Captured before station profile">
+            </div>
             <table class="auditor-table">
               <thead><tr><th>Station</th><th>Measured CPM</th><th>Section Read</th><th>Range Rule</th></tr></thead>
               <tbody id="shaftDataRows">
@@ -3103,6 +3139,9 @@ def home() -> str:
     let sketchIntersections = [];
     let designHistory = [];
     let designFuture = [];
+    const AUDITOR_STATIONS = [41, 36, 31, 26, 21, 16, 11];
+    const AUDITOR_CAPTURE_STEPS = ['butt', ...AUDITOR_STATIONS];
+    let auditorCaptureIndex = 0;
     let materialLibrary = {};
     let activeDrag = null;
     let selectedFlagIndex = null;
@@ -4328,7 +4367,7 @@ def home() -> str:
     }
 
     function shaftDataStationRows() {
-      return [41, 36, 31, 26, 21, 16, 11].map(station => {
+      return AUDITOR_STATIONS.map(station => {
         const rawValue = document.getElementById(`shaftCpm${station}`)?.value;
         const hasValue = rawValue !== '' && rawValue != null;
         const cpm = hasValue ? auditorCpmReading(Number(rawValue)) : null;
@@ -4344,6 +4383,152 @@ def home() -> str:
           analyzer_limited: hasValue && Number(rawValue) > 999
         };
       });
+    }
+
+    function currentAuditorStation() {
+      return AUDITOR_CAPTURE_STEPS[Math.min(auditorCaptureIndex, AUDITOR_CAPTURE_STEPS.length - 1)];
+    }
+
+    function auditorCaptureLabel(step) {
+      return step === 'butt' ? 'Butt Frequency' : `${step}"`;
+    }
+
+    function auditorCaptureInputForStep(step) {
+      return step === 'butt'
+        ? document.getElementById('shaftButtFrequency')
+        : document.getElementById(`shaftCpm${step}`);
+    }
+
+    function auditorButtFrequencyValue() {
+      const rawValue = document.getElementById('shaftButtFrequency')?.value;
+      if (rawValue === '' || rawValue == null) return null;
+      return auditorCpmReading(Number(rawValue));
+    }
+
+    function updateAuditorCaptureUi(focusInput = false) {
+      const step = currentAuditorStation();
+      const stationEl = document.getElementById('auditorCaptureStation');
+      const sectionEl = document.getElementById('auditorCaptureSection');
+      const inputEl = document.getElementById('auditorCaptureInput');
+      const statusEl = document.getElementById('auditorCaptureStatus');
+      if (stationEl) stationEl.textContent = auditorCaptureLabel(step);
+      if (sectionEl) sectionEl.textContent = step === 'butt' ? 'Standalone Measurement' : `${cpmSectionForStation(step)} Station`;
+      const buttInput = document.getElementById('shaftButtFrequency');
+      if (buttInput) buttInput.classList.toggle('active-capture', step === 'butt');
+      AUDITOR_STATIONS.forEach(item => {
+        const input = document.getElementById(`shaftCpm${item}`);
+        const row = input?.closest?.('tr');
+        if (row) row.classList.toggle('active-capture', item === step);
+      });
+      if (statusEl) {
+        const filled = AUDITOR_CAPTURE_STEPS.filter(item => {
+          const value = auditorCaptureInputForStep(item)?.value;
+          return value !== '' && value != null;
+        }).length;
+        statusEl.textContent = filled >= AUDITOR_CAPTURE_STEPS.length
+          ? 'Butt frequency and all 7 Auditor stations captured. Analyze or update any reading.'
+          : `Ready for ${auditorCaptureLabel(step)}. ${filled}/8 readings captured.`;
+      }
+      if (focusInput && inputEl) {
+        inputEl.focus();
+        inputEl.select();
+      }
+    }
+
+    function setAuditorCaptureIndexForNextMissing() {
+      const nextMissing = AUDITOR_CAPTURE_STEPS.findIndex(station => {
+        const value = auditorCaptureInputForStep(station)?.value;
+        return value === '' || value == null;
+      });
+      auditorCaptureIndex = nextMissing >= 0 ? nextMissing : AUDITOR_CAPTURE_STEPS.length - 1;
+      updateAuditorCaptureUi();
+    }
+
+    function captureAuditorReading(button) {
+      const inputEl = document.getElementById('auditorCaptureInput');
+      const step = currentAuditorStation();
+      const raw = inputEl?.value;
+      const value = Number(raw);
+      if (raw === '' || raw == null || !Number.isFinite(value)) {
+        setAppStatus(`Enter the Auditor CPM reading for ${auditorCaptureLabel(step)} before capture.`, true);
+        updateAuditorCaptureUi(true);
+        return;
+      }
+      if (value < 0 || value > 999) {
+        setAppStatus('Auditor readings must be between 0 and 999 CPM.', true);
+        updateAuditorCaptureUi(true);
+        return;
+      }
+      const stationInput = auditorCaptureInputForStep(step);
+      if (stationInput) stationInput.value = value.toFixed(1);
+      if (inputEl) inputEl.value = '';
+      if (auditorCaptureIndex < AUDITOR_CAPTURE_STEPS.length - 1) auditorCaptureIndex += 1;
+      flashButton(button, 'Captured');
+      analyzeShaftData();
+      updateAuditorCaptureUi(true);
+      setAppStatus(`Captured ${value.toFixed(1)} CPM for ${auditorCaptureLabel(step)}.`);
+    }
+
+    function stepAuditorCapture(backward = false, button = null) {
+      auditorCaptureIndex = Math.min(
+        AUDITOR_CAPTURE_STEPS.length - 1,
+        Math.max(0, auditorCaptureIndex + (backward ? -1 : 1))
+      );
+      if (button) flashButton(button, backward ? 'Back' : 'Next');
+      updateAuditorCaptureUi(true);
+    }
+
+    function resetAuditorCapture(button) {
+      const buttInput = document.getElementById('shaftButtFrequency');
+      if (buttInput) buttInput.value = '';
+      AUDITOR_STATIONS.forEach(station => {
+        const input = document.getElementById(`shaftCpm${station}`);
+        if (input) input.value = '';
+      });
+      const inputEl = document.getElementById('auditorCaptureInput');
+      if (inputEl) inputEl.value = '';
+      auditorCaptureIndex = 0;
+      latestShaftDataProfile = null;
+      renderShaftDataProfile();
+      updateAuditorCaptureUi(true);
+      flashButton(button, 'Reset');
+      setAppStatus('Auditor capture reset to standalone butt frequency.');
+    }
+
+    function bindAuditorCaptureKeys() {
+      const inputEl = document.getElementById('auditorCaptureInput');
+      if (!inputEl || inputEl.dataset.bound === '1') return;
+      inputEl.dataset.bound = '1';
+      inputEl.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        safeInvoke('auditorCaptureEnter', () => captureAuditorReading(document.getElementById('auditorCaptureBtn')));
+      });
+      AUDITOR_STATIONS.forEach((station, index) => {
+        const stationInput = document.getElementById(`shaftCpm${station}`);
+        if (!stationInput || stationInput.dataset.captureBound === '1') return;
+        stationInput.dataset.captureBound = '1';
+        stationInput.addEventListener('focus', () => {
+          auditorCaptureIndex = index + 1;
+          updateAuditorCaptureUi();
+        });
+        stationInput.addEventListener('change', () => {
+          analyzeShaftData();
+          updateAuditorCaptureUi();
+        });
+      });
+      const buttInput = document.getElementById('shaftButtFrequency');
+      if (buttInput && buttInput.dataset.captureBound !== '1') {
+        buttInput.dataset.captureBound = '1';
+        buttInput.addEventListener('focus', () => {
+          auditorCaptureIndex = 0;
+          updateAuditorCaptureUi();
+        });
+        buttInput.addEventListener('change', () => {
+          analyzeShaftData();
+          updateAuditorCaptureUi();
+        });
+      }
     }
 
     function avgPresent(values) {
@@ -4371,6 +4556,7 @@ def home() -> str:
         if (buttAvgEl) buttAvgEl.textContent = '-';
         if (midAvgEl) midAvgEl.textContent = '-';
         if (tipAvgEl) tipAvgEl.textContent = '-';
+        updateAuditorCaptureUi();
         return;
       }
       if (stateEl) stateEl.textContent = profile.complete ? 'Profile captured' : 'Incomplete profile';
@@ -4379,6 +4565,7 @@ def home() -> str:
       if (tipAvgEl) tipAvgEl.textContent = profile.section_averages.tip == null ? '-' : `${profile.section_averages.tip.toFixed(1)} CPM`;
       if (findingsEl) findingsEl.innerHTML = profile.findings.map(item => `<li>${escapeFitText(item)}</li>`).join('');
       if (packetEl) packetEl.textContent = JSON.stringify(profile, null, 2);
+      updateAuditorCaptureUi();
     }
 
     function analyzeShaftData(button) {
@@ -4388,10 +4575,13 @@ def home() -> str:
       const buttAvg = avgPresent(stations.filter(row => row.section === 'Butt').map(row => row.cpm));
       const midAvg = avgPresent(stations.filter(row => row.section === 'Mid').map(row => row.cpm));
       const tipAvg = avgPresent(stations.filter(row => row.section === 'Tip').map(row => row.cpm));
+      const buttFrequency = auditorButtFrequencyValue();
       const first = stations.find(row => row.cpm != null);
       const last = [...stations].reverse().find(row => row.cpm != null);
       const gradient = first && last ? last.cpm - first.cpm : null;
       const findings = [];
+      if (buttFrequency == null) findings.push('Standalone butt frequency is missing.');
+      else findings.push(`Standalone butt frequency is ${buttFrequency.toFixed(1)} CPM.`);
       if (missing.length) findings.push(`Missing Auditor readings at ${missing.join(', ')}.`);
       findings.push('Auditor range is 0-999 CPM; values above 999 should be treated as capped instrument readings, not real CPM values.');
       if (buttAvg != null) findings.push(`Butt section average is ${buttAvg.toFixed(1)} CPM; butt flex deltas are roughly 10 CPM per full flex.`);
@@ -4421,6 +4611,7 @@ def home() -> str:
           trim_state: document.getElementById('shaftDataTrimState')?.value || '',
           notes: document.getElementById('shaftDataNotes')?.value || ''
         },
+        butt_frequency_cpm: buttFrequency,
         stations,
         section_averages: {butt: buttAvg, mid: midAvg, tip: tipAvg},
         profile_gradient_cpm: gradient,
@@ -4442,23 +4633,25 @@ def home() -> str:
         if (input) input.value = auditorCpmReading(Number(zone.cpm || 0)).toFixed(1);
       });
       if (latest?.overall_cpm && document.getElementById('shaftCpm41')) {
-        document.getElementById('shaftCpm41').value = auditorCpmReading(latest.overall_cpm).toFixed(1);
+        const buttFrequencyInput = document.getElementById('shaftButtFrequency');
+        if (buttFrequencyInput) buttFrequencyInput.value = auditorCpmReading(latest.overall_cpm).toFixed(1);
       }
       analyzeShaftData();
+      setAuditorCaptureIndexForNextMissing();
       setAppStatus('Current simulated CPM profile imported into Shaft Data.');
     }
 
     function applyShaftDataTarget(button) {
       if (!latestShaftDataProfile) analyzeShaftData();
-      const butt = latestShaftDataProfile?.section_averages?.butt;
+      const butt = latestShaftDataProfile?.butt_frequency_cpm ?? latestShaftDataProfile?.section_averages?.butt;
       if (butt == null) {
-        setAppStatus('Enter butt section CPM before applying a target.', true);
+        setAppStatus('Enter standalone butt frequency before applying a target.', true);
         return;
       }
       flashButton(button, 'Applied');
       document.getElementById('target').value = butt.toFixed(1);
       run();
-      setAppStatus(`Target CPM set from measured butt average: ${butt.toFixed(1)}.`);
+      setAppStatus(`Target CPM set from measured butt frequency: ${butt.toFixed(1)}.`);
     }
 
     function fitMultiplier(value, mapping) {
@@ -8711,6 +8904,9 @@ method = "${document.getElementById('method').value}"`
         shaftDataAnalyzeBtn: button => analyzeShaftData(button),
         shaftDataImportBtn: button => importCurrentModelToShaftData(button),
         shaftDataApplyBtn: button => applyShaftDataTarget(button),
+        auditorCaptureBtn: button => captureAuditorReading(button),
+        auditorBackBtn: button => stepAuditorCapture(true, button),
+        auditorResetBtn: button => resetAuditorCapture(button),
         cameraStartBtn: button => startCameraFit(button),
         cameraCaptureBtn: button => startCameraSwingCapture(button),
         cameraAiReviewBtn: button => aiReviewCapturedSwings(button),
@@ -8963,6 +9159,8 @@ method = "${document.getElementById('method').value}"`
       renderDesignHistory();
       applyViewerMode();
       bootstrapButtons();
+      bindAuditorCaptureKeys();
+      updateAuditorCaptureUi();
       ['target', 'head', 'speed', 'angle', 'material', 'method', 'architectureMode'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
