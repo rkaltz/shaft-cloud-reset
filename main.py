@@ -742,6 +742,106 @@ def fit_target_from_swing(
     }
 
 
+SHAFT_REFERENCE_DATABASE: list[dict[str, Any]] = [
+    {
+        "name": "Smooth loader mid-launch reference",
+        "speed_range": [88, 102],
+        "tempo": "Smooth",
+        "transition": "Smooth",
+        "profile": "active handle, stable mid, responsive tip",
+        "material_family": "T700S / MR70 style intermediate modulus",
+        "best_for": "players who need load feel without over-stiff tip recovery",
+    },
+    {
+        "name": "Neutral tour-weight reference",
+        "speed_range": [98, 110],
+        "tempo": "Medium",
+        "transition": "Medium",
+        "profile": "balanced butt/mid/tip with neutral launch",
+        "material_family": "T800H style high-strength carbon",
+        "best_for": "baseline fitting and first prototype validation",
+    },
+    {
+        "name": "Hard transition anti-left reference",
+        "speed_range": [106, 118],
+        "tempo": "Aggressive",
+        "transition": "Hard",
+        "profile": "firm handle, reinforced mid, tip/torque control",
+        "material_family": "M40J / high-modulus bias support",
+        "best_for": "fast loaders who close the face quickly or fight left misses",
+    },
+    {
+        "name": "High-speed low-spin reference",
+        "speed_range": [116, 130],
+        "tempo": "Aggressive",
+        "transition": "Hard",
+        "profile": "localized ultra-high-modulus support with guarded feel",
+        "material_family": "M46J / local pitch-fiber style reinforcement",
+        "best_for": "very high-speed players after lower launch and tighter dispersion",
+    },
+]
+
+
+def shaft_reference_matches(speed_mph: float, tempo: str, transition: str, miss: str) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    for item in SHAFT_REFERENCE_DATABASE:
+        low, high = item["speed_range"]
+        score = 0
+        if low <= speed_mph <= high:
+            score += 3
+        if item["tempo"] == tempo:
+            score += 1
+        if item["transition"] == transition:
+            score += 2
+        if miss == "Left" and "anti-left" in item["name"].lower():
+            score += 2
+        if miss == "High spin" and "low-spin" in item["name"].lower():
+            score += 2
+        if score:
+            match = dict(item)
+            match["match_score"] = score
+            matches.append(match)
+    return sorted(matches, key=lambda item: item["match_score"], reverse=True)[:3]
+
+
+def manufacturing_zones(fit: dict[str, Any], swing: dict[str, Any]) -> list[dict[str, Any]]:
+    transition = fit["inputs"]["transition"]
+    release = fit["inputs"]["release"]
+    miss = fit["inputs"]["miss"]
+    load_index = swing["shaft_load_index"]
+    torque = fit["torque_target_deg"]
+    return [
+        {
+            "zone": "Butt / handle",
+            "design_goal": "Preserve load feel without letting the handle collapse.",
+            "layup_note": "Use axial 0 degree stability with light hoop support; increase butt flag width when load index exceeds 72.",
+            "qc_target": "41 inch and 36 inch CPM should step smoothly without a dead handle.",
+            "trigger": f"{transition} transition, load index {load_index:.0f}",
+        },
+        {
+            "zone": "Mid / recovery",
+            "design_goal": "Control kick timing and keep face delivery predictable.",
+            "layup_note": f"Bias pair near +/-{fit['wrap_angle_deg']:.0f} degrees; add braid/tape/braid support for hard transitions.",
+            "qc_target": "31/26/21 inch CPM slope must not show a flat spot.",
+            "trigger": f"{release} release timing",
+        },
+        {
+            "zone": "Tip / launch",
+            "design_goal": fit["tip_strategy"],
+            "layup_note": "Use local tip flag changes first; avoid overbuilding the whole shaft to solve a tip-only problem.",
+            "qc_target": "16 inch and 11 inch stations stay inside target window; torque validates before player test.",
+            "trigger": f"{fit['launch_bias']}, {miss} miss",
+        },
+        {
+            "zone": "Torque / feel shell",
+            "design_goal": f"Hold roughly {torque:.2f} deg torque while protecting feel.",
+            "layup_note": "Use hoop/helix/braid as a shell variable; validate torque before adding stiffer carbon everywhere.",
+            "qc_target": "Torque, EI, CPM, and range feedback agree before freezing CAD.",
+            "trigger": f"face closure {swing['face_closure_rate']:.0f}, tempo {fit['inputs']['tempo']}",
+        },
+    ]
+
+
 def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     """Translate camera/manual swing capture metrics into a buildable shaft target."""
 
@@ -753,13 +853,17 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     transition_load = float(payload.get("transition_load", 55.0) or 55.0)
     release_score = float(payload.get("release_score", 50.0) or 50.0)
     closure_rate = float(payload.get("face_closure_rate", 50.0) or 50.0)
+    attack_angle = float(payload.get("attack_angle_deg", 0.0) or 0.0)
+    face_to_path = float(payload.get("face_to_path_deg", 0.0) or 0.0)
+    shaft_load_index = float(payload.get("shaft_load_index", transition_load) or transition_load)
+    hand_path = str(payload.get("hand_path", "neutral") or "neutral")
     motion_quality = float(payload.get("motion_quality", 70.0) or 70.0)
     motion_score = float(payload.get("motion_score", 50.0) or 50.0)
 
     tempo = "Smooth" if tempo_seconds >= 1.18 else "Aggressive" if tempo_seconds <= 0.9 or motion_score >= 72 else "Medium"
-    transition = "Hard" if transition_load >= 68 or motion_score >= 78 else "Smooth" if transition_load <= 38 else "Medium"
+    transition = "Hard" if transition_load >= 68 or shaft_load_index >= 72 or motion_score >= 78 else "Smooth" if transition_load <= 38 else "Medium"
     release = "Late" if release_score >= 64 else "Early" if release_score <= 36 else "Mid"
-    miss = "Left" if closure_rate >= 68 else "Right" if closure_rate <= 32 else "High spin" if spin_rpm >= 3100 else "Low launch" if launch_deg <= 10.5 else "Neutral"
+    miss = "Left" if closure_rate >= 68 or face_to_path >= 3.0 else "Right" if closure_rate <= 32 or face_to_path <= -3.0 else "High spin" if spin_rpm >= 3100 else "Low launch" if launch_deg <= 10.5 or attack_angle <= -2.0 else "Neutral"
     feel = "Boardy/stout" if transition == "Hard" and speed_mph >= 108 else "Softer load" if tempo == "Smooth" and transition != "Hard" else "Stable mid"
 
     fit = fit_target_from_swing(
@@ -780,6 +884,10 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
         "transition_load": transition_load,
         "release_score": release_score,
         "face_closure_rate": closure_rate,
+        "attack_angle_deg": attack_angle,
+        "face_to_path_deg": face_to_path,
+        "shaft_load_index": shaft_load_index,
+        "hand_path": hand_path,
         "motion_quality": motion_quality,
         "motion_score": motion_score,
         "derived_inputs": {
@@ -792,6 +900,22 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
         "confidence": "usable" if motion_quality >= 65 else "manual review required",
         "boundary": "Camera metrics are fitting inputs, not final manufacturing proof. Validate with CPM and range testing.",
     }
+    fit["why_this_fit"] = [
+        f"{speed_mph:.0f} mph speed sets the base stiffness and weight class.",
+        f"{tempo} tempo with {transition} transition drives the handle/mid stability target.",
+        f"{release} release timing and {closure_rate:.0f} face-closure score shape tip recovery.",
+        f"{launch_deg:.1f} deg launch, {spin_rpm:.0f} rpm spin, and {attack_angle:.1f} deg attack angle set the launch/spin bias.",
+        f"{hand_path} hand path and {face_to_path:.1f} deg face-to-path are treated as directional fit clues, not final proof.",
+    ]
+    fit["manufacturing_zones"] = manufacturing_zones(fit, fit["swing_capture"])
+    fit["proof_requirements"] = [
+        "Capture at least three clean swings before trusting the camera profile.",
+        "Compare the generated 7-zone CPM target against the measured shaft after build.",
+        "Validate launch, spin, start line, and face delivery on a launch monitor.",
+        "Change one build variable at a time so the database learns what actually moved performance.",
+        "Store prototype results in the shaft database before declaring the recipe proven.",
+    ]
+    fit["shaft_database_matches"] = shaft_reference_matches(speed_mph, tempo, transition, miss)
     return fit
 
 
@@ -1393,6 +1517,12 @@ def home() -> str:
     .camera-result h3 { margin-top: 0; }
     .camera-capture-list { display: grid; gap: 7px; margin-top: 8px; }
     .camera-capture-pill { border: 1px solid #d9e4e1; background: #eef5f3; border-radius: 6px; padding: 8px; font-size: 13px; }
+    .camera-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+    .camera-section-card { border: 1px solid #cbd8d5; border-radius: 8px; padding: 10px; background: #f8fbfa; }
+    .camera-section-card h4 { margin: 0 0 8px; color: #0d3f35; }
+    .camera-section-card ul { margin: 0; padding-left: 18px; }
+    .camera-section-card li { margin-bottom: 6px; }
+    .camera-wide-card { grid-column: 1 / -1; }
     .brief-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .brief-card { border: 1px solid #d9e4e1; background: #ffffff; border-radius: 6px; padding: 10px; min-height: 96px; }
     .brief-card span { display: block; color: #50615e; font-size: 12px; font-weight: 800; text-transform: uppercase; }
@@ -1471,7 +1601,7 @@ def home() -> str:
       .cad-drawing-canvas { min-height: 520px; height: 64vh; }
       .cad-right-panel { max-height: none; }
     }
-    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid, .camera-fit-layout { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
+    @media (max-width: 900px) { main, .grid2, .guidance-card, .brief-grid, .camera-fit-layout, .camera-section-grid { grid-template-columns: 1fr; } .metrics { grid-template-columns: 1fr 1fr; } .workspace-head { align-items: flex-start; flex-direction: column; } .tabs { justify-content: flex-start; } }
     @media (max-width: 560px) { header { align-items: flex-start; flex-direction: column; } .metrics, .mini-grid, .primary-actions .secondary-row { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -1739,6 +1869,10 @@ def home() -> str:
               <div><label>Transition Load</label><input id="cameraTransitionLoad" type="number" value="55" step="1" min="0" max="100"></div>
               <div><label>Release Score</label><input id="cameraReleaseScore" type="number" value="50" step="1" min="0" max="100"></div>
               <div><label>Face Closure Rate</label><input id="cameraClosureRate" type="number" value="50" step="1" min="0" max="100"></div>
+              <div><label>Attack Angle (deg)</label><input id="cameraAttackAngle" type="number" value="0" step="0.1"></div>
+              <div><label>Face-to-Path (deg)</label><input id="cameraFacePath" type="number" value="0" step="0.1"></div>
+              <div><label>Shaft Load Index</label><input id="cameraShaftLoad" type="number" value="55" step="1" min="0" max="100"></div>
+              <div><label>Hand Path</label><select id="cameraHandPath"><option selected>neutral</option><option>in-to-out</option><option>out-to-in</option><option>vertical</option><option>shallow</option></select></div>
               <div><label>Launch (deg)</label><input id="cameraLaunch" type="number" value="13.5" step="0.1"></div>
               <div><label>Spin (rpm)</label><input id="cameraSpin" type="number" value="2650" step="10"></div>
               <div><label>Target Weight (g)</label><input id="cameraWeight" type="number" value="65" step="1"></div>
@@ -1750,6 +1884,24 @@ def home() -> str:
             </div>
             <h3>AI Shaft Result</h3>
             <table><tbody id="cameraFitResult"></tbody></table>
+            <div class="camera-section-grid">
+              <div class="camera-section-card camera-wide-card">
+                <h4>Why This Shaft</h4>
+                <ul id="cameraWhyList"><li>No fit explanation yet.</li></ul>
+              </div>
+              <div class="camera-section-card">
+                <h4>Manufacturing Zones</h4>
+                <ul id="cameraZoneList"><li>No build zones yet.</li></ul>
+              </div>
+              <div class="camera-section-card">
+                <h4>Proof Before Trust</h4>
+                <ul id="cameraProofList"><li>No proof checklist yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>Starter Shaft Database Matches</h4>
+                <ul id="cameraDatabaseList"><li>No comparable shafts yet.</li></ul>
+              </div>
+            </div>
             <h3>Capture Packet</h3>
             <pre id="cameraPacket">No swing packet yet.</pre>
           </div>
@@ -3414,6 +3566,10 @@ def home() -> str:
         transition_load: cameraNumber('cameraTransitionLoad', 55),
         release_score: cameraNumber('cameraReleaseScore', 50),
         face_closure_rate: cameraNumber('cameraClosureRate', 50),
+        attack_angle_deg: cameraNumber('cameraAttackAngle', 0),
+        face_to_path_deg: cameraNumber('cameraFacePath', 0),
+        shaft_load_index: cameraNumber('cameraShaftLoad', cameraNumber('cameraTransitionLoad', 55)),
+        hand_path: document.getElementById('cameraHandPath')?.value || 'neutral',
         launch_deg: cameraNumber('cameraLaunch', 13.5),
         spin_rpm: cameraNumber('cameraSpin', 2650),
         weight_g: cameraNumber('cameraWeight', 65),
@@ -3430,8 +3586,74 @@ def home() -> str:
       const motionQuality = Math.max(35, Math.min(96, Math.round(88 - Math.abs(samples.length - 30) * 1.4 + Math.min(peakMotion, 18))));
       const payload = cameraManualPayload('browser-camera', motionScore, motionQuality);
       payload.transition_load = Math.max(payload.transition_load, Math.min(100, Math.round(42 + peakMotion * 1.9)));
+      payload.shaft_load_index = Math.max(payload.shaft_load_index, Math.min(100, Math.round(45 + peakMotion * 2.1)));
       payload.tempo_seconds = Math.max(0.65, Math.min(1.45, payload.tempo_seconds - Math.min(0.22, avgMotion / 260)));
       return payload;
+    }
+
+    function cameraReferenceMatches(payload, inputs) {
+      const references = [
+        {name: 'Smooth loader mid-launch reference', speed: [88, 102], tempo: 'Smooth', transition: 'Smooth', profile: 'active handle, stable mid, responsive tip'},
+        {name: 'Neutral tour-weight reference', speed: [98, 110], tempo: 'Medium', transition: 'Medium', profile: 'balanced butt/mid/tip with neutral launch'},
+        {name: 'Hard transition anti-left reference', speed: [106, 118], tempo: 'Aggressive', transition: 'Hard', profile: 'firm handle, reinforced mid, tip/torque control'},
+        {name: 'High-speed low-spin reference', speed: [116, 130], tempo: 'Aggressive', transition: 'Hard', profile: 'localized high-modulus support with guarded feel'}
+      ];
+      return references.map(item => {
+        let score = 0;
+        if (payload.speed_mph >= item.speed[0] && payload.speed_mph <= item.speed[1]) score += 3;
+        if (inputs.tempo === item.tempo) score += 1;
+        if (inputs.transition === item.transition) score += 2;
+        if (inputs.miss === 'Left' && item.name.includes('anti-left')) score += 2;
+        if (inputs.miss === 'High spin' && item.name.includes('low-spin')) score += 2;
+        return {...item, match_score: score};
+      }).filter(item => item.match_score > 0).sort((a, b) => b.match_score - a.match_score).slice(0, 3);
+    }
+
+    function enrichCameraFitProfile(profile, payload, inputs) {
+      const why = [
+        `${Number(payload.speed_mph).toFixed(0)} mph speed sets the base stiffness and weight class.`,
+        `${inputs.tempo} tempo with ${inputs.transition} transition drives the handle/mid stability target.`,
+        `${inputs.release} release timing and ${Number(payload.face_closure_rate).toFixed(0)} face-closure score shape tip recovery.`,
+        `${Number(payload.launch_deg).toFixed(1)} deg launch, ${Number(payload.spin_rpm).toFixed(0)} rpm spin, and ${Number(payload.attack_angle_deg).toFixed(1)} deg attack angle set the launch/spin bias.`,
+        `${payload.hand_path} hand path and ${Number(payload.face_to_path_deg).toFixed(1)} deg face-to-path are treated as directional fit clues, not final proof.`
+      ];
+      const zones = [
+        {
+          zone: 'Butt / handle',
+          design_goal: 'Preserve load feel without letting the handle collapse.',
+          layup_note: 'Use axial 0 degree stability with light hoop support; increase butt flag width when load index exceeds 72.',
+          trigger: `${inputs.transition} transition, load index ${Number(payload.shaft_load_index).toFixed(0)}`
+        },
+        {
+          zone: 'Mid / recovery',
+          design_goal: 'Control kick timing and keep face delivery predictable.',
+          layup_note: `Bias pair near +/-${profile.wrap_angle_deg.toFixed(0)} degrees; add braid/tape/braid support for hard transitions.`,
+          trigger: `${inputs.release} release timing`
+        },
+        {
+          zone: 'Tip / launch',
+          design_goal: profile.tip_strategy,
+          layup_note: 'Use local tip flag changes first; avoid overbuilding the whole shaft to solve a tip-only problem.',
+          trigger: `${profile.launch_bias}, ${inputs.miss} miss`
+        },
+        {
+          zone: 'Torque / feel shell',
+          design_goal: `Hold roughly ${profile.torque_target_deg.toFixed(2)} deg torque while protecting feel.`,
+          layup_note: 'Use hoop/helix/braid as a shell variable; validate torque before adding stiffer carbon everywhere.',
+          trigger: `face closure ${Number(payload.face_closure_rate).toFixed(0)}, tempo ${inputs.tempo}`
+        }
+      ];
+      profile.why_this_fit = why;
+      profile.manufacturing_zones = zones;
+      profile.proof_requirements = [
+        'Capture at least three clean swings before trusting the camera profile.',
+        'Compare the generated 7-zone CPM target against the measured shaft after build.',
+        'Validate launch, spin, start line, and face delivery on a launch monitor.',
+        'Change one build variable at a time so the database learns what actually moved performance.',
+        'Store prototype results in the shaft database before declaring the recipe proven.'
+      ];
+      profile.shaft_database_matches = cameraReferenceMatches(payload, inputs);
+      return profile;
     }
 
     function buildSwingFitFromPayload(payload) {
@@ -3456,6 +3678,7 @@ def home() -> str:
         if (el) el.value = value;
       });
       runFitToBuild();
+      latestFitProfile = enrichCameraFitProfile(latestFitProfile, payload, {tempo, transition, release, miss, feel});
       latestCameraSwingProfile = {
         captured_at: new Date().toISOString(),
         payload,
@@ -3473,9 +3696,17 @@ def home() -> str:
       const result = document.getElementById('cameraFitResult');
       const packet = document.getElementById('cameraPacket');
       const list = document.getElementById('cameraCaptureList');
+      const whyList = document.getElementById('cameraWhyList');
+      const zoneList = document.getElementById('cameraZoneList');
+      const proofList = document.getElementById('cameraProofList');
+      const databaseList = document.getElementById('cameraDatabaseList');
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
         if (packet) packet.textContent = 'No swing packet yet.';
+        if (whyList) whyList.innerHTML = '<li>No fit explanation yet.</li>';
+        if (zoneList) zoneList.innerHTML = '<li>No build zones yet.</li>';
+        if (proofList) proofList.innerHTML = '<li>No proof checklist yet.</li>';
+        if (databaseList) databaseList.innerHTML = '<li>No comparable shafts yet.</li>';
       } else {
         const fit = latestCameraSwingProfile.fit_target;
         const inputs = latestCameraSwingProfile.derived_inputs;
@@ -3492,6 +3723,18 @@ def home() -> str:
             ['Miss Bias', inputs.miss],
             ['Confidence', latestCameraSwingProfile.payload.motion_quality + ' / 100']
           ].map(row => `<tr><td>${row[0]}</td><td>${escapeFitText(row[1])}</td></tr>`).join('');
+        }
+        if (whyList) {
+          whyList.innerHTML = (fit.why_this_fit || []).map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No fit explanation yet.</li>';
+        }
+        if (zoneList) {
+          zoneList.innerHTML = (fit.manufacturing_zones || []).map(item => `<li><strong>${escapeFitText(item.zone)}</strong>: ${escapeFitText(item.design_goal)} ${escapeFitText(item.layup_note)}</li>`).join('') || '<li>No build zones yet.</li>';
+        }
+        if (proofList) {
+          proofList.innerHTML = (fit.proof_requirements || []).map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No proof checklist yet.</li>';
+        }
+        if (databaseList) {
+          databaseList.innerHTML = (fit.shaft_database_matches || []).map(item => `<li><strong>${escapeFitText(item.name)}</strong>: ${escapeFitText(item.profile)} (${item.match_score}/8 match)</li>`).join('') || '<li>No comparable shafts yet.</li>';
         }
         if (packet) packet.textContent = JSON.stringify(latestCameraSwingProfile, null, 2);
       }

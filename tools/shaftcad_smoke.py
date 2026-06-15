@@ -22,6 +22,11 @@ def main_check() -> None:
     require("AI Shaft Builder Brief" in html, "Fit-to-build UI is missing")
     require("Camera Fit" in html, "Camera fitting tab is missing")
     require("startCameraFit" in html, "Camera fitting controls are not wired")
+    require("cameraAttackAngle" in html, "Camera fitting attack-angle input is missing")
+    require("cameraShaftLoad" in html, "Camera fitting shaft-load input is missing")
+    require("Why This Shaft" in html, "Camera fitting explanation panel is missing")
+    require("Manufacturing Zones" in html, "Camera fitting manufacturing zones panel is missing")
+    require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
 
     design = main.analyze_shaft()
@@ -70,6 +75,10 @@ def main_check() -> None:
             "transition_load": 74.0,
             "release_score": 68.0,
             "face_closure_rate": 42.0,
+            "attack_angle_deg": -1.2,
+            "face_to_path_deg": 0.4,
+            "shaft_load_index": 80.0,
+            "hand_path": "shallow",
             "launch_deg": 13.2,
             "spin_rpm": 2500.0,
             "motion_quality": 82.0,
@@ -78,6 +87,11 @@ def main_check() -> None:
     )
     require(swing_fit["inputs"]["transition"] == "Hard", "camera swing transition derivation drifted")
     require(swing_fit["swing_capture"]["confidence"] == "usable", "camera swing confidence drifted")
+    require(swing_fit["swing_capture"]["shaft_load_index"] == 80.0, "camera swing load index was not preserved")
+    require(len(swing_fit["why_this_fit"]) >= 5, "camera swing explanation is incomplete")
+    require(len(swing_fit["manufacturing_zones"]) >= 4, "camera swing manufacturing zones are incomplete")
+    require(len(swing_fit["proof_requirements"]) >= 5, "camera swing proof checklist is incomplete")
+    require(swing_fit["shaft_database_matches"], "camera swing database matches are missing")
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
     direct_handoff = main.api_manufacturing_handoff()
