@@ -33,3 +33,7 @@ Health Check Path: /health
 
 Open the Render URL without `/docs`.
 
+## Smoke Check
+
+Run `python tools/shaftcad_smoke.py` to verify the AI Shaft Builder Brief, Fit/CAD handoff, CPM analyzer caps, and behavior profile still work after changes.
+

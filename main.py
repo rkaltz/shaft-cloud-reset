@@ -193,11 +193,13 @@ def transformed_modulus(material: Material, angle_deg: float) -> float:
     angle = radians(angle_deg)
     c = cos(angle)
     s = sin(angle)
-    return (
-        material.e1_pa * c**4
-        + material.e2_pa * s**4
-        + (2.0 * material.g12_pa + material.nu12 * material.e1_pa) * s**2 * c**2
-    )
+    nu21 = material.nu12 * material.e2_pa / material.e1_pa
+    denom = max(1e-9, 1.0 - material.nu12 * nu21)
+    q11 = material.e1_pa / denom
+    q22 = material.e2_pa / denom
+    q12 = material.nu12 * material.e2_pa / denom
+    q66 = material.g12_pa
+    return q11 * c**4 + 2.0 * (q12 + 2.0 * q66) * s**2 * c**2 + q22 * s**4
 
 
 def effective_modulus(segment: Segment, material: Material) -> float:
@@ -255,7 +257,7 @@ def zone_profile(segments: list[Segment], material: Material, calibration: CpmCa
                 "station_in": float(station),
                 "effective_span_in": effective_span,
                 "cpm": cpm,
-                "raw_model_cpm": cpm,
+                "raw_model_cpm": formula_cpm,
                 "analyzer_limited": formula_cpm > AUDITOR_CPM_MAX or formula_cpm < AUDITOR_CPM_MIN,
                 "analyzer_range": f"{AUDITOR_CPM_MIN:.0f}-{AUDITOR_CPM_MAX:.0f}",
             }
@@ -2949,7 +2951,7 @@ def home() -> str:
       const raw = Number(zone.raw_model_cpm ?? zone.raw_cpm ?? cpm);
       const limited = Boolean(zone.analyzer_limited) || raw > 999 || raw < 0;
       const boostText = boost ? ` <small>+${boost.toFixed(1)}</small>` : '';
-      const limitText = limited ? ` <small>at analyzer limit</small>` : '';
+      const limitText = limited ? ` <small>analyzer cap; model ${raw.toFixed(1)}</small>` : '';
       return `${cpm.toFixed(1)}${boostText}${limitText}`;
     }
 
@@ -4426,7 +4428,7 @@ ${y2.toFixed(3)}
         return {
           ...zone,
           base_cpm: zone.cpm,
-          raw_model_cpm: adjustedReading,
+          raw_model_cpm: unclampedAdjusted,
           tape_boost: localBoost,
           cpm: adjustedReading,
           analyzer_limited: Boolean(zone.analyzer_limited) || unclampedAdjusted > 999 || unclampedAdjusted < 0
