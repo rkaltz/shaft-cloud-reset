@@ -27,6 +27,7 @@ def main_check() -> None:
     require("Camera 2 - Down the Line" in html, "Down-line camera lane is missing")
     require("cameraVideoDownLine" in html, "Down-line camera video element is missing")
     require("cameraAiReviewBtn" in html, "AI swing review button is missing")
+    require("camera-focus" in html, "Camera focus layout is missing")
     require("buildCapturedSwingAiReview" in html, "AI swing review logic is missing")
     require("interviewClubType" in html, "Interview fitting type input is missing")
     require("interviewTendencies" in html, "Interview tendencies checklist is missing")

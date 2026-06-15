@@ -1992,6 +1992,8 @@ def home() -> str:
     .build-fingerprint button { width: auto; margin: 0; padding: 5px 9px; font-size: 12px; }
     .viewer-note { color: #8a4d00; font-weight: 700; margin-left: 8px; }
     main { display: grid; grid-template-columns: 360px 1fr; gap: 0; min-height: calc(100vh - 111px); }
+    body.camera-focus main { grid-template-columns: 1fr; }
+    body.camera-focus main > section:first-child { display: none; }
     section { background: #f8fbfa; border-right: 1px solid #b9c8c4; padding: 16px; }
     section.workspace { background: #eef2f0; border-right: 0; padding: 0; }
     .workspace-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #ffffff; border-bottom: 1px solid #cdd9d6; padding: 12px 14px; }
@@ -2061,6 +2063,8 @@ def home() -> str:
     .fit-builder-brief { border: 1px solid #cbd8d5; background: #f9fbfa; border-radius: 6px; padding: 12px; margin: 12px 0; }
     .fit-builder-brief h3 { margin-top: 0; }
     .camera-fit-layout { display: grid; grid-template-columns: minmax(360px, 1.2fr) minmax(320px, 0.8fr); gap: 14px; align-items: start; }
+    body.camera-focus .camera-fit-layout { grid-template-columns: 1fr; }
+    body.camera-focus .camera-stage video { min-height: clamp(300px, 34vw, 560px); }
     .camera-stage { background: #101918; color: #d7fff6; border: 1px solid #2d3f3c; border-radius: 8px; padding: 12px; }
     .camera-feed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .camera-feed-card { border: 1px solid #344642; border-radius: 8px; padding: 8px; background: #0a1211; }
@@ -3904,6 +3908,7 @@ def home() -> str:
 
     function showView(viewName) {
       if (viewName === 'drawing') viewName = 'cad3d';
+      document.body.classList.toggle('camera-focus', viewName === 'camera');
       const simulation = document.getElementById('simulationView');
       const cameraView = document.getElementById('cameraView');
       const fitView = document.getElementById('fitView');
