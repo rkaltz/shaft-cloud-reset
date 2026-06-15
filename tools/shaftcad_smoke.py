@@ -36,6 +36,8 @@ def main_check() -> None:
     require("cameraWristFloor" in html, "Wrist-to-floor input is missing")
     require("Shaft Sensation / Quality" in html, "Shaft sensation/quality panel is missing")
     require("cameraImpactSensation" in html, "Impact sensation input is missing")
+    require("Wishon Profile / Torque Guard" in html, "Wishon profile guard panel is missing")
+    require("cameraCurrentTorque" in html, "Current torque input is missing")
     require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
 
@@ -116,6 +118,7 @@ def main_check() -> None:
             "shaft_preference_score": 3.0,
             "current_flex_label": "S",
             "current_shaft_weight_g": 82.0,
+            "current_torque_deg": 5.2,
             "motion_quality": 82.0,
             "motion_score": 78.0,
         }
@@ -148,6 +151,11 @@ def main_check() -> None:
     require(
         any("softer" in item for item in swing_fit["shaft_sensation_quality"]["recommendations"]),
         "Shaft sensation read missed harsh/stiff softer-profile recommendation",
+    )
+    require(swing_fit["wishon_profile_guard"]["torque_notes"], "Wishon torque notes are missing")
+    require(
+        any("7-point" in item for item in swing_fit["wishon_profile_guard"]["findings"]),
+        "Wishon profile finding is missing",
     )
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
@@ -211,6 +219,26 @@ def main_check() -> None:
     )
     require(any("speed alone" in item for item in sensation["findings"]), "Sensation study finding is missing")
     require(any("regular/softer" in item for item in sensation["recommendations"]), "Sensation read missed softer-profile candidate")
+
+    wishon = main.wishon_profile_guard(
+        {
+            "speed_mph": 116.0,
+            "visual_transition_move": "jump start",
+            "visual_tempo_control": "aggressive",
+            "shot_miss_direction": "left",
+            "impact_sensation": "harsh",
+            "current_torque_deg": 5.2,
+            "release": "Late",
+        }
+    )
+    require(
+        any("High torque" in item for item in wishon["torque_notes"]),
+        "Wishon torque guard missed high-torque aggressive case",
+    )
+    require(
+        any("0.5 inch" in item for item in wishon["trimming_notes"]),
+        "Wishon trimming guidance is missing",
+    )
 
     direct_handoff = main.api_manufacturing_handoff()
     require(direct_handoff["package"] == "AE ShaftCAD Manufacturer Handoff Pack", "handoff endpoint payload failed")

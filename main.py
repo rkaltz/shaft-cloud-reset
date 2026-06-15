@@ -1157,6 +1157,71 @@ def shaft_sensation_quality_read(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def wishon_profile_guard(payload: dict[str, Any]) -> dict[str, Any]:
+    """Wishon-style guardrails for bend profile, torque, and trimming decisions."""
+
+    speed_mph = float(payload.get("speed_mph", 105.0) or 105.0)
+    transition = str(payload.get("transition", payload.get("visual_transition_move", "unknown")) or "unknown").lower()
+    tempo = str(payload.get("tempo", payload.get("visual_tempo_control", "unknown")) or "unknown").lower()
+    release = str(payload.get("release", "Mid") or "Mid").lower()
+    miss_direction = str(payload.get("shot_miss_direction", "unknown") or "unknown").lower()
+    impact_sensation = str(payload.get("impact_sensation", "unknown") or "unknown").lower()
+    current_torque = float(payload.get("current_torque_deg", 0.0) or 0.0)
+
+    findings = [
+        "Use measured 7-point bend profile data before trusting R/S/X flex labels.",
+        "Butt, mid, and tip sections should be treated separately because different swing phases load different shaft sections.",
+        "Torque is mainly an accuracy/feel guardrail; weight, overall stiffness, and bend profile usually matter more.",
+    ]
+    profile_requirements = [
+        "Store CPM/frequency at seven stations and classify butt, mid, and tip stiffness independently.",
+        "Compare profile shape against known shafts instead of comparing only butt CPM.",
+        "When a target shaft is known, search for profile-match candidates by percentage, weight, torque, and availability.",
+    ]
+    recommendations: list[str] = []
+    trimming_notes: list[str] = []
+    torque_notes: list[str] = []
+
+    aggressive = "hard" in transition or "jump" in transition or "aggressive" in tempo or speed_mph >= 112
+    if aggressive:
+        recommendations.append("Strong transition / fast tempo: prioritize profile stability and consider the firmer trim family before chasing a stiffer printed flex.")
+    else:
+        recommendations.append("Smooth or moderate move: keep softer/profile-active candidates alive and let impact quality decide.")
+
+    if current_torque >= 5.0 and aggressive:
+        torque_notes.append("High torque with aggressive transition can allow the head to over-rotate and produce left/hook bias.")
+    elif current_torque > 0 and current_torque <= 3.0 and impact_sensation in {"harsh", "dead", "boardy"}:
+        torque_notes.append("Very low torque can feel less solid/comfortable for some players; do not over-tighten torque if feel suffers.")
+    else:
+        torque_notes.append("Treat torque as a fine-tuning variable after length, weight, profile, and strike pattern are under control.")
+
+    if miss_direction in {"left", "hook", "pull left"} and aggressive:
+        recommendations.append("Left miss with aggressive transition: add torque/profile stability locally before changing the whole shaft.")
+    if miss_direction in {"right", "slice", "push right"} and impact_sensation in {"harsh", "dead", "boardy"}:
+        recommendations.append("Right miss with harsh/stiff feedback: test more active release feel before reducing loft or adding tip stiffness.")
+
+    trimming_notes.extend(
+        [
+            "Driver wood trim starts at 0 inch tip trim; butt trim to final length after fitting.",
+            "Increasing tip trim by 0.5 inch should mostly feel slightly firmer, not radically change launch/spin.",
+            "Increasing tip trim by 1 inch is a stronger stiffness change; launch/spin effects are still modest and show most for later-release players.",
+            "Decreasing tip trim softens feel; do not use trimming as a substitute for selecting the correct bend profile.",
+        ]
+    )
+    if release == "late":
+        trimming_notes.append("Late release player: tip-trim changes are more likely to show in launch/spin, so validate carefully.")
+
+    return {
+        "findings": findings,
+        "profile_requirements": profile_requirements,
+        "recommendations": recommendations,
+        "torque_notes": torque_notes,
+        "trimming_notes": trimming_notes,
+        "source_anchor": "Tom Wishon Shaft Selector / trimming / torque guidance: bend profile beats flex label; torque is secondary to weight, stiffness, and profile.",
+        "boundary": "Wishon guardrails are fitting logic, not a manufacturer-specific prescription. Validate with measured profile, impact marks, and player testing.",
+    }
+
+
 def manufacturing_zones(fit: dict[str, Any], swing: dict[str, Any]) -> list[dict[str, Any]]:
     transition = fit["inputs"]["transition"]
     release = fit["inputs"]["release"]
@@ -1274,6 +1339,7 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     fit["launch_rollout_optimizer"] = driver_launch_rollout_optimizer(payload)
     fit["static_length_lie"] = static_length_lie_fit(payload)
     fit["shaft_sensation_quality"] = shaft_sensation_quality_read(payload)
+    fit["wishon_profile_guard"] = wishon_profile_guard(payload)
     return fit
 
 
@@ -2258,6 +2324,7 @@ def home() -> str:
               <div><label>Shaft Preference (0-9)</label><input id="cameraPreferenceScore" type="number" value="0" step="0.5" min="0" max="9"></div>
               <div><label>Current Flex</label><select id="cameraCurrentFlex"><option selected>unknown</option><option>R</option><option>S</option><option>X</option><option>A</option><option>L</option></select></div>
               <div><label>Current Shaft Weight (g)</label><input id="cameraCurrentShaftWeight" type="number" value="0" step="1"></div>
+              <div><label>Current Torque (deg)</label><input id="cameraCurrentTorque" type="number" value="0" step="0.1"></div>
               <div><label>Target Weight (g)</label><input id="cameraWeight" type="number" value="65" step="1"></div>
             </div>
             <div class="fit-actions">
@@ -2299,6 +2366,10 @@ def home() -> str:
               <div class="camera-section-card camera-wide-card">
                 <h4>Shaft Sensation / Quality</h4>
                 <ul id="cameraSensationList"><li>No sensation/quality read yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>Wishon Profile / Torque Guard</h4>
+                <ul id="cameraWishonList"><li>No Wishon guard read yet.</li></ul>
               </div>
               <div class="camera-section-card camera-wide-card">
                 <h4>Starter Shaft Database Matches</h4>
@@ -4000,6 +4071,7 @@ def home() -> str:
         shaft_preference_score: cameraNumber('cameraPreferenceScore', 0),
         current_flex_label: document.getElementById('cameraCurrentFlex')?.value || 'unknown',
         current_shaft_weight_g: cameraNumber('cameraCurrentShaftWeight', 0),
+        current_torque_deg: cameraNumber('cameraCurrentTorque', 0),
         weight_g: cameraNumber('cameraWeight', 65),
         motion_score: motionScore ?? 50,
         motion_quality: motionQuality ?? 70
@@ -4043,6 +4115,7 @@ def home() -> str:
       const rolloutRead = buildLaunchRolloutRead(payload);
       const staticFit = buildStaticLengthLieFit(payload);
       const sensationQuality = buildShaftSensationQuality(payload);
+      const wishonGuard = buildWishonProfileGuard(payload);
       const why = [
         `${Number(payload.speed_mph).toFixed(0)} mph speed sets the base stiffness and weight class.`,
         `${inputs.tempo} tempo with ${inputs.transition} transition drives the handle/mid stability target.`,
@@ -4092,7 +4165,64 @@ def home() -> str:
       profile.launch_rollout_optimizer = rolloutRead;
       profile.static_length_lie = staticFit;
       profile.shaft_sensation_quality = sensationQuality;
+      profile.wishon_profile_guard = wishonGuard;
       return profile;
+    }
+
+    function buildWishonProfileGuard(payload) {
+      const speed = Number(payload.speed_mph || 105);
+      const transition = String(payload.transition || payload.visual_transition_move || 'unknown').toLowerCase();
+      const tempo = String(payload.tempo || payload.visual_tempo_control || 'unknown').toLowerCase();
+      const release = String(payload.release || 'Mid').toLowerCase();
+      const miss = String(payload.shot_miss_direction || 'unknown').toLowerCase();
+      const sensation = String(payload.impact_sensation || 'unknown').toLowerCase();
+      const torque = Number(payload.current_torque_deg || 0);
+      const aggressive = transition.includes('hard') || transition.includes('jump') || tempo.includes('aggressive') || speed >= 112;
+      const findings = [
+        'Use measured 7-point bend profile data before trusting R/S/X flex labels.',
+        'Butt, mid, and tip sections should be treated separately because different swing phases load different shaft sections.',
+        'Torque is mainly an accuracy/feel guardrail; weight, overall stiffness, and bend profile usually matter more.'
+      ];
+      const profileRequirements = [
+        'Store CPM/frequency at seven stations and classify butt, mid, and tip stiffness independently.',
+        'Compare profile shape against known shafts instead of comparing only butt CPM.',
+        'When a target shaft is known, search for profile-match candidates by percentage, weight, torque, and availability.'
+      ];
+      const recommendations = [
+        aggressive
+          ? 'Strong transition / fast tempo: prioritize profile stability and consider the firmer trim family before chasing a stiffer printed flex.'
+          : 'Smooth or moderate move: keep softer/profile-active candidates alive and let impact quality decide.'
+      ];
+      const torqueNotes = [];
+      if (torque >= 5 && aggressive) {
+        torqueNotes.push('High torque with aggressive transition can allow the head to over-rotate and produce left/hook bias.');
+      } else if (torque > 0 && torque <= 3 && ['harsh', 'dead', 'boardy'].includes(sensation)) {
+        torqueNotes.push('Very low torque can feel less solid/comfortable for some players; do not over-tighten torque if feel suffers.');
+      } else {
+        torqueNotes.push('Treat torque as a fine-tuning variable after length, weight, profile, and strike pattern are under control.');
+      }
+      if (['left', 'hook', 'pull left'].includes(miss) && aggressive) {
+        recommendations.push('Left miss with aggressive transition: add torque/profile stability locally before changing the whole shaft.');
+      }
+      if (['right', 'slice', 'push right'].includes(miss) && ['harsh', 'dead', 'boardy'].includes(sensation)) {
+        recommendations.push('Right miss with harsh/stiff feedback: test more active release feel before reducing loft or adding tip stiffness.');
+      }
+      const trimmingNotes = [
+        'Driver wood trim starts at 0 inch tip trim; butt trim to final length after fitting.',
+        'Increasing tip trim by 0.5 inch should mostly feel slightly firmer, not radically change launch/spin.',
+        'Increasing tip trim by 1 inch is a stronger stiffness change; launch/spin effects are still modest and show most for later-release players.',
+        'Decreasing tip trim softens feel; do not use trimming as a substitute for selecting the correct bend profile.'
+      ];
+      if (release === 'late') trimmingNotes.push('Late release player: tip-trim changes are more likely to show in launch/spin, so validate carefully.');
+      return {
+        findings,
+        profile_requirements: profileRequirements,
+        recommendations,
+        torque_notes: torqueNotes,
+        trimming_notes: trimmingNotes,
+        source_anchor: 'Tom Wishon Shaft Selector / trimming / torque guidance: bend profile beats flex label; torque is secondary to weight, stiffness, and profile.',
+        boundary: 'Wishon guardrails are fitting logic, not a manufacturer-specific prescription. Validate with measured profile, impact marks, and player testing.'
+      };
     }
 
     function buildShaftSensationQuality(payload) {
@@ -4382,6 +4512,7 @@ def home() -> str:
       const rolloutList = document.getElementById('cameraRolloutList');
       const staticFitList = document.getElementById('cameraStaticFitList');
       const sensationList = document.getElementById('cameraSensationList');
+      const wishonList = document.getElementById('cameraWishonList');
       const databaseList = document.getElementById('cameraDatabaseList');
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
@@ -4394,6 +4525,7 @@ def home() -> str:
         if (rolloutList) rolloutList.innerHTML = '<li>No launch/rollout read yet.</li>';
         if (staticFitList) staticFitList.innerHTML = '<li>No static fit start yet.</li>';
         if (sensationList) sensationList.innerHTML = '<li>No sensation/quality read yet.</li>';
+        if (wishonList) wishonList.innerHTML = '<li>No Wishon guard read yet.</li>';
         if (databaseList) databaseList.innerHTML = '<li>No comparable shafts yet.</li>';
       } else {
         const fit = latestCameraSwingProfile.fit_target;
@@ -4473,6 +4605,19 @@ def home() -> str:
             sensation.study_anchor ? `Study anchor: ${sensation.study_anchor}` : ''
           ].filter(Boolean);
           sensationList.innerHTML = sensationItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No sensation/quality read yet.</li>';
+        }
+        if (wishonList) {
+          const wishon = fit.wishon_profile_guard || {};
+          const wishonItems = [
+            ...(wishon.findings || []),
+            ...(wishon.profile_requirements || []).map(item => `Profile: ${item}`),
+            ...(wishon.recommendations || []),
+            ...(wishon.torque_notes || []).map(item => `Torque: ${item}`),
+            ...(wishon.trimming_notes || []).map(item => `Trim: ${item}`),
+            wishon.source_anchor ? `Source anchor: ${wishon.source_anchor}` : '',
+            wishon.boundary ? `Boundary: ${wishon.boundary}` : ''
+          ].filter(Boolean);
+          wishonList.innerHTML = wishonItems.map(item => `<li>${escapeFitText(item)}</li>`).join('') || '<li>No Wishon guard read yet.</li>';
         }
         if (databaseList) {
           databaseList.innerHTML = (fit.shaft_database_matches || []).map(item => `<li><strong>${escapeFitText(item.name)}</strong>: ${escapeFitText(item.profile)} (${item.match_score}/8 match)</li>`).join('') || '<li>No comparable shafts yet.</li>';
@@ -8203,6 +8348,11 @@ def api_static_length_lie(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/shaft-sensation-quality")
 def api_shaft_sensation_quality(payload: dict[str, Any]) -> dict[str, Any]:
     return shaft_sensation_quality_read(payload)
+
+
+@app.post("/api/wishon-profile-guard")
+def api_wishon_profile_guard(payload: dict[str, Any]) -> dict[str, Any]:
+    return wishon_profile_guard(payload)
 
 
 @app.get("/api/fit-cad/bridge")
