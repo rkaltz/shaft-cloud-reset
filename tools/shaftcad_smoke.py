@@ -40,6 +40,7 @@ def main_check() -> None:
     require("cameraCurrentTorque" in html, "Current torque input is missing")
     require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
+    require("1 flex =" in html, "CPM section flex-delta display is missing")
 
     design = main.analyze_shaft()
     require(math.isfinite(design["overall_cpm"]), "overall CPM is not finite")
@@ -51,11 +52,25 @@ def main_check() -> None:
     require(45.0 <= spec["mass_g"] <= 85.0, "default driver shaft mass should be in the common 45-85g range")
     require(0.0 <= design["zone_profile"][-1]["cpm"] <= 999.0, "11-inch CPM exceeds Auditor range")
     require(design["zone_profile"][-1]["analyzer_limited"], "11-inch overflow is not flagged")
+    require(design["zone_profile"][0]["section"] == "Butt", "41-inch station should classify as butt section")
+    require(design["zone_profile"][2]["section"] == "Mid", "31-inch station should classify as mid section")
+    require(design["zone_profile"][-1]["section"] == "Tip", "11-inch station should classify as tip section")
+    require(design["zone_profile"][0]["full_flex_delta_cpm"] == 10.0, "Butt full-flex CPM delta drifted")
+    require(design["zone_profile"][2]["full_flex_delta_cpm"] == 25.0, "Mid full-flex CPM delta drifted")
+    require(design["zone_profile"][-1]["full_flex_delta_cpm"] == 40.0, "Tip full-flex CPM delta drifted")
     require(
         design["zone_profile"][-1]["raw_model_cpm"] > design["zone_profile"][-1]["cpm"],
         "raw model CPM should preserve unclamped simulation value",
     )
     require(len(design["behavior_intelligence"]["cpm_values"]) == 8, "behavior profile should include butt plus 7 stations")
+    require(
+        "butt about 10 CPM" in design["behavior_intelligence"]["cpm_range_rule"],
+        "Behavior intelligence lost CPM section flex rule",
+    )
+    require(
+        design["behavior_intelligence"]["cpm_section_ranges"][2]["full_flex_delta_cpm"] == 40.0,
+        "Tip section reference range drifted",
+    )
     require("shaft inner diameter stations" in design["gcode"], "mandrel G-code should be based on shaft ID")
     require("segment[\"id_mm\"]" in design["cadquery_step_recipe"], "STEP recipe should generate mandrel from ID stations")
 

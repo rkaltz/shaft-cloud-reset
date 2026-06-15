@@ -155,6 +155,29 @@ ARCHITECTURE_MODES: dict[str, dict[str, Any]] = {
 ZONE_STATIONS_IN = [41, 36, 31, 26, 21, 16, 11]
 AUDITOR_CPM_MIN = 0.0
 AUDITOR_CPM_MAX = 999.0
+CPM_SECTION_RANGES = {
+    "Butt": {
+        "stations_in": [41, 36],
+        "soft": (140.0, 155.0),
+        "medium": (155.0, 175.0),
+        "stiff": (175.0, 190.0),
+        "full_flex_delta_cpm": 10.0,
+    },
+    "Mid": {
+        "stations_in": [31, 26, 21],
+        "soft": (220.0, 250.0),
+        "medium": (250.0, 290.0),
+        "stiff": (290.0, 320.0),
+        "full_flex_delta_cpm": 25.0,
+    },
+    "Tip": {
+        "stations_in": [16, 11],
+        "soft": (680.0, 740.0),
+        "medium": (740.0, 820.0),
+        "stiff": (820.0, 880.0),
+        "full_flex_delta_cpm": 40.0,
+    },
+}
 
 
 @dataclass
@@ -171,6 +194,39 @@ DEFAULT_CPM_CAL = CpmCalibration()
 
 def auditor_cpm_reading(value: float) -> float:
     return max(AUDITOR_CPM_MIN, min(AUDITOR_CPM_MAX, float(value)))
+
+
+def cpm_section_for_station(station_in: float) -> str:
+    station = int(round(station_in))
+    for section, reference in CPM_SECTION_RANGES.items():
+        if station in reference["stations_in"]:
+            return section
+    return "Unknown"
+
+
+def cpm_range_label(section: str, cpm: float) -> str:
+    reference = CPM_SECTION_RANGES.get(section)
+    if not reference:
+        return "unknown"
+    for label in ("soft", "medium", "stiff"):
+        low, high = reference[label]
+        if low <= cpm <= high:
+            return label
+    if cpm < reference["soft"][0]:
+        return "below soft"
+    return "above stiff"
+
+
+def cpm_section_reference(section: str) -> dict[str, Any]:
+    reference = CPM_SECTION_RANGES[section]
+    return {
+        "section": section,
+        "stations_in": reference["stations_in"],
+        "soft_range_cpm": reference["soft"],
+        "medium_range_cpm": reference["medium"],
+        "stiff_range_cpm": reference["stiff"],
+        "full_flex_delta_cpm": reference["full_flex_delta_cpm"],
+    }
 
 
 def default_segments(base_angle: float = 45.0, thickness_m: float = 0.000125) -> list[Segment]:
@@ -288,7 +344,7 @@ def overall_cpm(segments: list[Segment], material: Material, calibration: CpmCal
     return calibration.overall_k * sqrt(ei / ((calibration.overall_weight_g / 1000.0) * effective_length**3))
 
 
-def zone_profile(segments: list[Segment], material: Material, calibration: CpmCalibration) -> list[dict[str, float]]:
+def zone_profile(segments: list[Segment], material: Material, calibration: CpmCalibration) -> list[dict[str, Any]]:
     ei = average_ei(segments, material)
     clamp = calibration.clamp_length_in
     rows = []
@@ -298,12 +354,21 @@ def zone_profile(segments: list[Segment], material: Material, calibration: CpmCa
             ei / ((calibration.profile_weight_g / 1000.0) * (effective_span * 0.0254) ** 3)
         )
         cpm = auditor_cpm_reading(formula_cpm)
+        section = cpm_section_for_station(station)
+        section_reference = CPM_SECTION_RANGES[section]
+        cpm_class = cpm_range_label(section, cpm)
         rows.append(
             {
                 "station_in": float(station),
+                "section": section,
                 "effective_span_in": effective_span,
                 "cpm": cpm,
                 "raw_model_cpm": formula_cpm,
+                "cpm_class": cpm_class,
+                "soft_range_cpm": section_reference["soft"],
+                "medium_range_cpm": section_reference["medium"],
+                "stiff_range_cpm": section_reference["stiff"],
+                "full_flex_delta_cpm": section_reference["full_flex_delta_cpm"],
                 "analyzer_limited": formula_cpm > AUDITOR_CPM_MAX or formula_cpm < AUDITOR_CPM_MIN,
                 "analyzer_range": f"{AUDITOR_CPM_MIN:.0f}-{AUDITOR_CPM_MAX:.0f}",
             }
@@ -550,6 +615,8 @@ def behavior_intelligence(
     return {
         "engine": "AE behavior intelligence",
         "cpm_values": [round(value, 1) for value in cpm_values],
+        "cpm_section_ranges": [cpm_section_reference(section) for section in ("Butt", "Mid", "Tip")],
+        "cpm_range_rule": "A full flex CPM delta changes by section: butt about 10 CPM, mid about 25 CPM, tip 40 CPM or more.",
         "fingerprint": fingerprint,
         "dynamic_bend": dynamic,
         "impact_deflection": impact,
@@ -3950,7 +4017,7 @@ def home() -> str:
       }
       if (optTitle) optTitle.textContent = best.speed_gain ? `+${Number(best.speed_gain.gain_mph || 0).toFixed(2)} mph` : 'Locked';
       if (optText) {
-        optText.textContent = `${optimizer.rule || 'Keep butt CPM fixed.'} Best move: mid ${Number(best.mid_delta_cpm || 0).toFixed(0)} CPM, tip ${Number(best.tip_delta_cpm || 0).toFixed(0)} CPM; timing efficiency ${Number(speedGain.timing_efficiency_pct || 0).toFixed(0)}%.`;
+        optText.textContent = `${optimizer.rule || 'Keep butt CPM fixed.'} ${behavior.cpm_range_rule || ''} Best move: mid ${Number(best.mid_delta_cpm || 0).toFixed(0)} CPM, tip ${Number(best.tip_delta_cpm || 0).toFixed(0)} CPM; timing efficiency ${Number(speedGain.timing_efficiency_pct || 0).toFixed(0)}%.`;
       }
     }
 
@@ -3989,6 +4056,27 @@ def home() -> str:
       return Math.max(0, Math.min(999, Number(value) || 0));
     }
 
+    const CPM_SECTION_RANGES = {
+      Butt: {stations: [41, 36], soft: [140, 155], medium: [155, 175], stiff: [175, 190], fullFlex: 10},
+      Mid: {stations: [31, 26, 21], soft: [220, 250], medium: [250, 290], stiff: [290, 320], fullFlex: 25},
+      Tip: {stations: [16, 11], soft: [680, 740], medium: [740, 820], stiff: [820, 880], fullFlex: 40}
+    };
+
+    function cpmSectionForStation(stationIn) {
+      const station = Math.round(Number(stationIn || 0));
+      return Object.keys(CPM_SECTION_RANGES).find(section => CPM_SECTION_RANGES[section].stations.includes(station)) || 'Unknown';
+    }
+
+    function cpmRangeLabel(section, cpm) {
+      const reference = CPM_SECTION_RANGES[section];
+      if (!reference) return 'unknown';
+      for (const label of ['soft', 'medium', 'stiff']) {
+        const [low, high] = reference[label];
+        if (cpm >= low && cpm <= high) return label;
+      }
+      return cpm < reference.soft[0] ? 'below soft' : 'above stiff';
+    }
+
     function zoneCpmDisplay(zone) {
       const cpm = auditorCpmReading(zone.cpm);
       const boost = Number(zone.tape_boost || 0);
@@ -3996,7 +4084,13 @@ def home() -> str:
       const limited = Boolean(zone.analyzer_limited) || raw > 999 || raw < 0;
       const boostText = boost ? ` <small>+${boost.toFixed(1)}</small>` : '';
       const limitText = limited ? ` <small>analyzer cap; model ${raw.toFixed(1)}</small>` : '';
-      return `${cpm.toFixed(1)}${boostText}${limitText}`;
+      const section = zone.section || cpmSectionForStation(zone.station_in);
+      const sectionReference = CPM_SECTION_RANGES[section] || {};
+      const flexDelta = Number(zone.full_flex_delta_cpm || sectionReference.fullFlex || 0);
+      const rangeLabel = `${section} ${zone.cpm_class || cpmRangeLabel(section, cpm)}`;
+      const fullFlexText = flexDelta ? `1 flex = ${flexDelta.toFixed(0)} CPM` : '';
+      const rangeText = [rangeLabel, fullFlexText].filter(Boolean).join('; ');
+      return `${cpm.toFixed(1)}${boostText}${limitText}<br><small>${escapeFitText(rangeText)}</small>`;
     }
 
     function fitMultiplier(value, mapping) {
@@ -6180,11 +6274,14 @@ ${y2.toFixed(3)}
         const baseReading = auditorCpmReading(Number(zone.cpm));
         const unclampedAdjusted = baseReading + localBoost;
         const adjustedReading = auditorCpmReading(unclampedAdjusted);
+        const section = zone.section || cpmSectionForStation(zone.station_in);
         return {
           ...zone,
           base_cpm: zone.cpm,
           raw_model_cpm: unclampedAdjusted,
           tape_boost: localBoost,
+          section,
+          cpm_class: cpmRangeLabel(section, adjustedReading),
           cpm: adjustedReading,
           analyzer_limited: Boolean(zone.analyzer_limited) || unclampedAdjusted > 999 || unclampedAdjusted < 0
         };
