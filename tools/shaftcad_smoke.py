@@ -58,6 +58,10 @@ def main_check() -> None:
     require("Starter Shaft Database Matches" in html, "Camera fitting database panel is missing")
     require("analyzer cap; model" in html, "Auditor cap wording is missing")
     require("1 flex =" in html, "CPM section flex-delta display is missing")
+    require("Prepreg Cut Flag Layout" in html, "Cut-ready flag layout title is missing")
+    require("drawFlagCutFace" in html, "Cut-ready flag renderer is missing")
+    require("ROOT CUT" in html, "Root cut edge labels are missing")
+    require("flagAngleLabel" in html, "Fiber direction labels are missing")
 
     design = main.analyze_shaft()
     require(math.isfinite(design["overall_cpm"]), "overall CPM is not finite")

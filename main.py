@@ -2799,7 +2799,7 @@ def home() -> str:
           <div class="cad-chip">Longest Flag<strong id="flagLongest">-</strong></div>
           <div class="cad-chip">Export<strong>SVG</strong></div>
         </div>
-        <h3>Prepreg Flag Constraint Sketcher</h3>
+        <h3>Prepreg Cut Flag Layout</h3>
         <div class="sketch-shell">
           <div class="sketch-menu">
             <button id="sketchMenuFileBtn" class="menu-btn" onclick="handleSketchMenu('file', this)">File</button>
@@ -6527,6 +6527,131 @@ def home() -> str:
       ctx.strokeRect(x - 5, y - 5, 10, 10);
     }
 
+    function flagBounds(points) {
+      const xs = points.map((point) => point[0]);
+      const ys = points.map((point) => point[1]);
+      const left = Math.min(...xs);
+      const right = Math.max(...xs);
+      const top = Math.min(...ys);
+      const bottom = Math.max(...ys);
+      return {left, right, top, bottom, width: right - left, height: bottom - top};
+    }
+
+    function flagAngleLabel(angle) {
+      const rounded = Math.round(Number(angle || 0));
+      if (Math.abs(rounded) <= 1) return 'axial 0 deg';
+      return `fiber ${rounded > 0 ? '+' : ''}${rounded} deg`;
+    }
+
+    function traceFlagPath(ctx, points) {
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point[0], point[1]);
+        else ctx.lineTo(point[0], point[1]);
+      });
+      ctx.closePath();
+    }
+
+    function drawFlagFiberGrain(ctx, flag, points, bounds) {
+      ctx.save();
+      traceFlagPath(ctx, points);
+      ctx.clip();
+      const angle = Number(flag.angle || 0) * Math.PI / 180;
+      const centerX = bounds.left + bounds.width / 2;
+      const centerY = bounds.top + bounds.height / 2;
+      const reach = bounds.width + bounds.height + 80;
+      ctx.translate(centerX, centerY);
+      ctx.rotate(angle);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.24)';
+      ctx.lineWidth = 1;
+      for (let y = -reach; y <= reach; y += 12) {
+        ctx.beginPath();
+        ctx.moveTo(-reach, y);
+        ctx.lineTo(reach, y);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
+      for (let y = -reach + 6; y <= reach; y += 24) {
+        ctx.beginPath();
+        ctx.moveTo(-reach, y);
+        ctx.lineTo(reach, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawFlagCutFace(ctx, flag, points, index, selected) {
+      const bounds = flagBounds(points);
+      const rootTop = points[0];
+      const tipTop = points[1];
+      const tipBottom = points[2];
+      const rootBottom = points[3];
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 4;
+      traceFlagPath(ctx, points);
+      ctx.fillStyle = layerColor(flag.layer);
+      ctx.globalAlpha = selected ? 0.88 : 0.72;
+      ctx.fill();
+      ctx.restore();
+
+      drawFlagFiberGrain(ctx, flag, points, bounds);
+
+      ctx.save();
+      traceFlagPath(ctx, points);
+      ctx.strokeStyle = selected ? '#ffe680' : '#f7f2df';
+      ctx.lineWidth = selected ? 4 : 3;
+      ctx.stroke();
+      ctx.strokeStyle = layerColor(flag.layer);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#ff55cc';
+      ctx.beginPath();
+      ctx.moveTo(rootTop[0], rootTop[1]);
+      ctx.lineTo(rootBottom[0], rootBottom[1]);
+      ctx.stroke();
+      ctx.strokeStyle = '#ffc36b';
+      ctx.beginPath();
+      ctx.moveTo(tipTop[0], tipTop[1]);
+      ctx.lineTo(tipBottom[0], tipBottom[1]);
+      ctx.stroke();
+      ctx.restore();
+
+      const arrowY = bounds.top + Math.min(bounds.height - 14, Math.max(14, bounds.height / 2));
+      ctx.save();
+      ctx.strokeStyle = '#ecfff8';
+      ctx.fillStyle = '#ecfff8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(bounds.left + 26, arrowY);
+      ctx.lineTo(bounds.right - 34, arrowY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(bounds.right - 34, arrowY);
+      ctx.lineTo(bounds.right - 44, arrowY - 5);
+      ctx.lineTo(bounds.right - 44, arrowY + 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.font = '700 12px Arial';
+      ctx.fillText(flagAngleLabel(flag.angle), bounds.left + 30, arrowY - 8);
+      ctx.restore();
+
+      ctx.save();
+      ctx.font = '700 13px Arial';
+      ctx.fillStyle = '#f8fffb';
+      const titleY = Math.max(16, bounds.top - 18);
+      ctx.fillText(`F${String(index + 1).padStart(2, '0')} ${flag.name} | ${flag.station}`, bounds.left, titleY);
+      ctx.font = '700 12px Arial';
+      ctx.fillStyle = '#ff8be7';
+      ctx.fillText(`ROOT CUT ${flag.root} mm`, bounds.left - 78, (rootTop[1] + rootBottom[1]) / 2 + 4);
+      ctx.fillStyle = '#ffd08a';
+      ctx.fillText(`TIP CUT ${flag.tip} mm`, bounds.right + 14, (tipTop[1] + tipBottom[1]) / 2 + 4);
+      ctx.restore();
+    }
+
     function drawDimHandle(ctx, x, y, label, active) {
       ctx.beginPath();
       ctx.fillStyle = active ? '#ff2d20' : '#b24ac7';
@@ -6545,9 +6670,9 @@ def home() -> str:
       const ctx = canvas.getContext('2d');
       sketchIntersections = computeSketchIntersections();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#101918';
+      ctx.fillStyle = '#0d1815';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = '#163c3a';
+      ctx.strokeStyle = '#17423d';
       ctx.setLineDash([4, 8]);
       for (let x = 40; x < canvas.width; x += 40) {
         ctx.beginPath(); ctx.moveTo(x, 30); ctx.lineTo(x, canvas.height - 35); ctx.stroke();
@@ -6587,24 +6712,14 @@ def home() -> str:
         const points = flagPoints(flag, x, y, scale);
         flagGeometry.push({x, y, scale, points});
         ctx.setLineDash([7, 7]);
-        ctx.strokeStyle = '#2a817c';
+        ctx.strokeStyle = 'rgba(78, 197, 188, 0.38)';
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + flag.length * scale, y); ctx.stroke();
         ctx.setLineDash([]);
-        ctx.beginPath();
-        points.forEach((p, i) => {
-          if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
-        });
-        ctx.closePath();
-        ctx.fillStyle = layerColor(flag.layer);
-        ctx.globalAlpha = 0.14;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = '#e8efed';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        drawFlagCutFace(ctx, flag, points, index, selectedFlagIndex === index);
 
         if (selectedFlagIndex === index) {
+          traceFlagPath(ctx, points);
           ctx.strokeStyle = '#b24ac7';
           ctx.lineWidth = 3;
           ctx.stroke();
@@ -6633,25 +6748,21 @@ def home() -> str:
           );
         });
 
-        ctx.strokeStyle = '#b24ac7';
+        ctx.strokeStyle = selectedFlagIndex === index ? '#b24ac7' : 'rgba(178, 74, 199, 0.35)';
         ctx.beginPath();
         ctx.moveTo(x + 20, y);
         ctx.lineTo(x + Math.cos(flag.angle * Math.PI / 180) * 78, y + Math.sin(flag.angle * Math.PI / 180) * 78);
         ctx.stroke();
 
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(`${flag.name} | ${flag.station} | ${flag.angle} deg`, x, y - flag.root * scale / 2 - 16);
-        ctx.fillStyle = layerColor(flag.layer);
-        ctx.fillRect(x + flag.length * scale + 14, y - 30, 58, 18);
-        ctx.fillStyle = '#101918';
-        ctx.fillText(flag.layer || 'ply', x + flag.length * scale + 19, y - 16);
+        ctx.fillStyle = '#d9f7f0';
+        ctx.font = '700 12px Arial';
+        ctx.fillText(`${flag.length} mm x ${flag.root}->${flag.tip} mm`, x + 10, y + flag.root * scale / 2 + 18);
         drawDimension(ctx, x, y + flag.root * scale / 2 + 18, x + flag.length * scale, y + flag.root * scale / 2 + 18, `${flag.length} mm`);
-        drawConstraintLabel(ctx, 'H', x + flag.length * scale / 2, y - 8);
-        drawConstraintLabel(ctx, 'V', x - 22, y + 5);
-        drawConstraintLabel(ctx, 'V', x + flag.length * scale + 10, y + 5);
-        ctx.fillStyle = '#b24ac7';
-        ctx.fillText(`Root ${flag.root} mm`, x - 82, y);
-        ctx.fillText(`Tip ${flag.tip} mm`, x + flag.length * scale + 14, y);
+        if (selectedFlagIndex === index) {
+          drawConstraintLabel(ctx, 'H', x + flag.length * scale / 2, y - 8);
+          drawConstraintLabel(ctx, 'V', x - 22, y + 5);
+          drawConstraintLabel(ctx, 'V', x + flag.length * scale + 10, y + 5);
+        }
 
         if (selectedFlagIndex === index) {
           const lengthHandle = { x: x + flag.length * scale, y: y + flag.root * scale / 2 + 30, flagIndex: index, dimension: 'length' };
