@@ -33,14 +33,19 @@ def main_check() -> None:
     require("Use Butt CPM as Target" in html, "Measured shaft target transfer is missing")
     require("Camera Fit" in html, "Camera fitting tab is missing")
     require("Pre-Fit Interview" in html, "Pre-fit interview form is missing")
-    require("Camera 1 - Face On" in html, "Face-on camera lane is missing")
+    require("Phone Swing Capture" in html, "Phone swing capture lane is missing")
+    require("Face-On Swing Set" in html, "Face-on camera lane is missing")
     require("cameraVideoFace" in html, "Face-on camera video element is missing")
-    require("Camera 2 - Down the Line" in html, "Down-line camera lane is missing")
+    require("Down-the-Line Swing Set" in html, "Down-line camera lane is missing")
     require("cameraVideoDownLine" in html, "Down-line camera video element is missing")
+    require("3 face-on swings" in html, "Phone fitting set guidance is missing")
+    require("AI Review 6-Swing Set" in html, "Six-swing AI review button is missing")
     require("cameraAiReviewBtn" in html, "AI swing review button is missing")
     require("camera-focus" in html, "Camera focus layout is missing")
     require("buildCapturedSwingAiReview" in html, "AI swing review logic is missing")
     require("interviewClubType" in html, "Interview fitting type input is missing")
+    require("utility iron" in html and "wedge" in html, "Iron/wedge fitting types are missing")
+    require(".355 taper tip" in html, "Iron taper-tip guidance is missing")
     require("interviewTendencies" in html, "Interview tendencies checklist is missing")
     require("Fitter Starting Direction" in html, "Fitter starting direction panel is missing")
     require("startCameraFit" in html, "Camera fitting controls are not wired")
@@ -214,8 +219,8 @@ def main_check() -> None:
         "Fitting interview did not react to pain/limitations",
     )
     require(
-        any("Driver path" in item for item in swing_fit["fitting_interview"]["start_points"]),
-        "Fitting interview did not add driver starting path",
+        any("Wood/hybrid path" in item for item in swing_fit["fitting_interview"]["start_points"]),
+        "Fitting interview did not add wood/hybrid starting path",
     )
     require(swing_fit["cad_translation"]["recommended_architecture"] == "braid_tape_braid", "camera swing CAD translation drifted")
 
@@ -313,7 +318,8 @@ def main_check() -> None:
         }
     )
     require(interview["club_type"] == "iron", "Fitting interview club type drifted")
-    require(any("Iron path" in item for item in interview["start_points"]), "Iron fitting interview path is missing")
+    require(interview["tip_standard"] == ".355 taper tip default", "Iron taper-tip default is missing")
+    require(any("Iron/wedge path" in item for item in interview["start_points"]), "Iron fitting interview path is missing")
     require(any("left-bias control" in item for item in interview["start_points"]), "Interview missed left-miss starting direction")
 
     direct_handoff = main.api_manufacturing_handoff()

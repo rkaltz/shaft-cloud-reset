@@ -1294,6 +1294,8 @@ def fitting_interview_read(payload: dict[str, Any]) -> dict[str, Any]:
 
     interview = payload.get("fitting_interview") or {}
     club_type = str(interview.get("club_type", "driver") or "driver").lower()
+    iron_like = club_type in {"iron", "wedge", "utility iron"}
+    wood_like = club_type in {"driver", "fairway wood", "hybrid"}
     tendencies = [str(item).lower() for item in interview.get("poor_shot_tendencies", [])]
     wants = [str(item).lower() for item in interview.get("personal_wants", [])]
     pain = str(interview.get("physical_pain", "unknown") or "unknown").lower()
@@ -1337,16 +1339,20 @@ def fitting_interview_read(payload: dict[str, Any]) -> dict[str, Any]:
     if handicap_trend == "going up":
         watch_items.append("Handicap trending up: prioritize misses, confidence, and playable dispersion over max-distance claims.")
 
-    if club_type == "iron":
-        start_points.append("Iron path: include static length/lie, dynamic lie marks, shaft weight, and contact pattern early.")
+    if iron_like:
+        start_points.append("Iron/wedge path: include static length/lie, dynamic lie marks, shaft weight, contact pattern, and .355 taper-tip compatibility early.")
+        watch_items.append("Iron lane: do not recommend parallel-tip trimming logic unless the fitter explicitly changes the shaft architecture.")
+    elif wood_like:
+        start_points.append("Wood/hybrid path: include loft, face angle, playing length, strike height, and carry/roll proof early.")
     else:
-        start_points.append("Driver path: include loft, face angle, playing length, strike height, and carry/roll proof early.")
+        start_points.append("General club path: identify head type, hosel/tip standard, target length, shaft weight, and impact pattern before choosing a profile.")
 
     if not start_points:
         start_points.append("Start with baseline interview, current specs, impact marks, and three clean swings.")
 
     return {
         "club_type": club_type,
+        "tip_standard": ".355 taper tip default" if iron_like else ".335 wood/hybrid default unless measured otherwise",
         "start_points": start_points,
         "watch_items": watch_items,
         "fitter_questions": fitter_questions,
@@ -1410,6 +1416,9 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
     hand_path = str(payload.get("hand_path", "neutral") or "neutral")
     motion_quality = float(payload.get("motion_quality", 70.0) or 70.0)
     motion_score = float(payload.get("motion_score", 50.0) or 50.0)
+    interview = payload.get("fitting_interview") or {}
+    club_type = str(interview.get("club_type", "driver") or "driver").lower()
+    iron_like = club_type in {"iron", "wedge", "utility iron"}
 
     tempo = "Smooth" if tempo_seconds >= 1.18 else "Aggressive" if tempo_seconds <= 0.9 or motion_score >= 72 else "Medium"
     transition = "Hard" if transition_load >= 68 or shaft_load_index >= 72 or motion_score >= 78 else "Smooth" if transition_load <= 38 else "Medium"
@@ -1441,6 +1450,8 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
         "hand_path": hand_path,
         "motion_quality": motion_quality,
         "motion_score": motion_score,
+        "club_type": club_type,
+        "tip_standard": ".355 taper tip default" if iron_like else ".335 wood/hybrid default unless measured otherwise",
         "derived_inputs": {
             "tempo": tempo,
             "transition": transition,
@@ -1466,8 +1477,38 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
         "Change one build variable at a time so the database learns what actually moved performance.",
         "Store prototype results in the shaft database before declaring the recipe proven.",
     ]
+    if iron_like:
+        fit["proof_requirements"] = [
+            "Capture three face-on and three down-the-line swings before trusting the iron fitting read.",
+            "Confirm .355 taper-tip fitment, raw length, target playing length, and no tip-trim assumption before build.",
+            "Validate static length/lie, dynamic lie marks, impact pattern, shaft weight, and set progression.",
+            "Compare measured butt frequency and station CPM against the intended iron profile after assembly.",
+            "Store range results before treating the recommendation as a repeatable iron shaft recipe.",
+        ]
+        fit["iron_fitting_lane"] = {
+            "club_type": club_type,
+            "tip_standard": ".355 taper tip default",
+            "start_bias": "Use shaft weight, length/lie, dynamic strike, tempo, transition, and release timing before changing flex label.",
+            "watch_items": [
+                "Do not use driver launch/rollout assumptions as the main iron proof.",
+                "Protect contact pattern and distance gapping before chasing raw speed.",
+                "Treat taper-tip shaft selection as profile matching, not tip trimming."
+            ],
+        }
     fit["shaft_database_matches"] = shaft_reference_matches(speed_mph, tempo, transition, miss)
-    fit["diy_driver_tuneup"] = diy_driver_tuneup(payload)
+    fit["diy_driver_tuneup"] = {
+        "actions": [
+            "Iron/wedge fitting lane active: start with static length/lie, dynamic lie marks, impact pattern, and shaft weight.",
+            "Use .355 taper-tip compatibility as the default unless the fitter confirms another hosel/shaft standard.",
+            "Validate gapping, trajectory window, strike location, and feel before locking the shaft family."
+        ],
+        "lead_tape_plan": [],
+        "shaft_notes": [
+            "For irons, shaft weight and bend profile usually matter before tiny flex-label differences.",
+            "Use butt frequency and station profile data as comparison evidence after fit direction is chosen."
+        ],
+        "warnings": ["This is an initial fitting lane, not a final build spec."]
+    } if iron_like else diy_driver_tuneup(payload)
     fit["visual_fitting"] = visual_fitting_read(payload)
     fit["launch_rollout_optimizer"] = driver_launch_rollout_optimizer(payload)
     fit["static_length_lie"] = static_length_lie_fit(payload)
@@ -2512,16 +2553,16 @@ def home() -> str:
         </div>
         <div class="camera-fit-layout">
           <div class="camera-stage">
-            <h3>Camera-Based Fitting</h3>
+            <h3>Phone Swing Capture</h3>
             <div class="camera-feed-grid">
               <div class="camera-feed-card">
-                <h4>Camera 1 - Face On</h4>
+                <h4>Face-On Swing Set</h4>
                 <video id="cameraVideoFace" playsinline muted></video>
                 <canvas id="cameraSampleCanvasFace" width="160" height="90"></canvas>
                 <div class="swing-meter"><span id="cameraMotionMeterFace"></span></div>
               </div>
               <div class="camera-feed-card">
-                <h4>Camera 2 - Down the Line</h4>
+                <h4>Down-the-Line Swing Set</h4>
                 <video id="cameraVideoDownLine" playsinline muted></video>
                 <canvas id="cameraSampleCanvasDownLine" width="160" height="90"></canvas>
                 <div class="swing-meter"><span id="cameraMotionMeterDownLine"></span></div>
@@ -2530,16 +2571,16 @@ def home() -> str:
             <div class="camera-hud">
               <span>Camera: <strong id="cameraDeviceState">Off</strong></span>
               <span>Capture: <strong id="cameraCaptureState">Idle</strong></span>
-              <span>Clean swings: <strong id="cameraSwingCount">0</strong></span>
+              <span>Swing set: <strong id="cameraSwingCount">0 / 6</strong></span>
             </div>
             <div class="camera-controls">
-              <button id="cameraStartBtn">Start Cameras</button>
-              <button id="cameraCaptureBtn" class="secondary">Capture Swing</button>
-              <button id="cameraAiReviewBtn" class="secondary">AI Review Captured Swings</button>
-              <button id="cameraStopBtn" class="secondary">Stop Cameras</button>
+              <button id="cameraStartBtn">Start Phone Camera</button>
+              <button id="cameraCaptureBtn" class="secondary">Capture Current View</button>
+              <button id="cameraAiReviewBtn" class="secondary">AI Review 6-Swing Set</button>
+              <button id="cameraStopBtn" class="secondary">Stop Camera</button>
             </div>
             <div class="camera-note">
-              Use Camera 1 face-on for setup, tempo, pressure shift, and shaft load clues. Use Camera 2 down the line for plane, path, hand path, and delivery clues. Manual fields keep the builder usable when camera permission or hardware is unavailable.
+              Use one phone camera. Capture 3 face-on swings, then move the phone down the line and capture 3 more. The assistant reviews all six swings as fitting evidence, not a final shaft specification. Manual fields are fitter overrides when launch data or camera permission is unavailable.
             </div>
             <div id="cameraCaptureList" class="camera-capture-list"></div>
           </div>
@@ -2547,7 +2588,7 @@ def home() -> str:
             <details class="interview-panel" open>
               <summary>Pre-Fit Interview</summary>
               <div class="mini-grid">
-                <div><label>Fitting Type</label><select id="interviewClubType"><option selected>driver</option><option>iron</option></select></div>
+                <div><label>Fitting Type</label><select id="interviewClubType"><option selected>driver</option><option>fairway wood</option><option>hybrid</option><option>utility iron</option><option>iron</option><option>wedge</option></select></div>
                 <div><label>Handedness</label><select id="interviewHandedness"><option selected>right-hand golfer</option><option>left-hand golfer</option></select></div>
                 <div><label>Years Playing</label><input id="interviewYearsPlaying" type="number" value="0" step="1"></div>
                 <div><label>Current Handicap</label><input id="interviewHandicap" type="text" value=""></div>
@@ -2599,6 +2640,7 @@ def home() -> str:
                 <div><label>Iron Head Preference</label><select id="interviewIronPreference"><option selected>unknown</option><option>blade style</option><option>cavity back - some game improvement</option><option>cavity back - all game improvement</option></select></div>
               </div>
               <label>Fitter Notes</label><textarea id="interviewNotes" rows="3" style="width:100%; box-sizing:border-box; margin-top:5px; border:1px solid #b9c8c4; border-radius:6px; padding:10px;"></textarea>
+              <p class="small-muted">Iron, wedge, and utility-iron starts assume .355 taper tip unless the fitter overrides the build data.</p>
             </details>
             <h3>Swing Inputs</h3>
             <div class="mini-grid">
@@ -3161,6 +3203,7 @@ def home() -> str:
     let cameraCaptures = [];
     let latestCameraSwingProfile = null;
     let cameraSampleTimer = null;
+    let cameraActiveView = 'face';
     let cameraPreviousBrightness = null;
     let cameraPreviousBrightnessByView = {face: null, downLine: null};
     let flagConstraints = defaultFlagConstraints(defaultFlags().length);
@@ -4724,7 +4767,15 @@ def home() -> str:
       const countEl = document.getElementById('cameraSwingCount');
       if (deviceEl && device) deviceEl.textContent = device;
       if (captureEl && capture) captureEl.textContent = capture;
-      if (countEl) countEl.textContent = String(cameraCaptures.length);
+      if (countEl) countEl.textContent = `${Math.min(cameraCaptures.length, 6)} / 6`;
+    }
+
+    function nextPhoneCaptureView() {
+      return cameraCaptures.length < 3 ? 'face' : 'downLine';
+    }
+
+    function captureViewLabel(viewKey) {
+      return viewKey === 'downLine' ? 'down-the-line' : 'face-on';
     }
 
     function cameraManualPayload(source, motionScore, motionQuality) {
@@ -4768,14 +4819,15 @@ def home() -> str:
         current_shaft_weight_g: cameraNumber('cameraCurrentShaftWeight', 0),
         current_torque_deg: cameraNumber('cameraCurrentTorque', 0),
         fitting_interview: fittingInterviewPayload(),
+        capture_view: cameraActiveView,
         camera_views: {
           face_on: {
-            label: 'Camera 1 - Face On',
+            label: 'Face-On Swing Set',
             role: 'setup, body motion, tempo, pressure shift, release timing, and face-on shaft load clues',
             samples: cameraMotionSamplesByView.face.slice(-40)
           },
           down_the_line: {
-            label: 'Camera 2 - Down the Line',
+            label: 'Down-the-Line Swing Set',
             role: 'swing plane, hand path, shaft plane, delivery path, and down-line club motion clues',
             samples: cameraMotionSamplesByView.downLine.slice(-40)
           }
@@ -4804,7 +4856,8 @@ def home() -> str:
         down_line_samples: downLineSamples.length,
         face_on_peak_motion: faceSamples.length ? Math.max(...faceSamples) : 0,
         down_line_peak_motion: downLineSamples.length ? Math.max(...downLineSamples) : 0,
-        review_note: 'Use face-on for setup/load/tempo and down-line for path/plane/delivery.'
+        capture_view: cameraActiveView,
+        review_note: 'Use three face-on swings for setup/load/tempo and three down-the-line swings for path/plane/delivery.'
       };
       return payload;
     }
@@ -5271,7 +5324,7 @@ def home() -> str:
         fit_target: latestFitProfile,
         boundary: 'Use this as a shaft design starting point. Validate with measured CPM, launch monitor, and player feedback.'
       };
-      cameraCaptures = [latestCameraSwingProfile, ...cameraCaptures].slice(0, 5);
+      cameraCaptures = [latestCameraSwingProfile, ...cameraCaptures].slice(0, 6);
       renderCameraFitResult();
       return latestCameraSwingProfile;
     }
@@ -5429,7 +5482,7 @@ def home() -> str:
         list.innerHTML = cameraCaptures.map((item, index) => {
           const fit = item.fit_target;
           const seed = item.payload.camera_review_seed || {};
-          const viewText = seed.down_line_samples ? '2-view capture' : seed.face_on_samples ? 'face-on only' : 'manual capture';
+          const viewText = seed.capture_view ? `${captureViewLabel(seed.capture_view)} capture` : seed.down_line_samples ? 'down-line capture' : seed.face_on_samples ? 'face-on capture' : 'manual capture';
           const reviewed = item.ai_review ? ' | AI review ready' : '';
           return `<div class="camera-capture-pill"><strong>Swing ${index + 1}</strong> - ${fit.target_cpm.toFixed(1)} CPM, ${item.derived_inputs.transition} transition, ${item.payload.motion_quality}/100 quality<br><small>${escapeFitText(viewText + reviewed)}</small></div>`;
         }).join('');
@@ -5447,23 +5500,30 @@ def home() -> str:
       }
       const primary = captures[0];
       const payload = primary.payload || {};
-      const seed = payload.camera_review_seed || {};
+      const faceCaptures = captures.filter(item => item?.payload?.capture_view === 'face');
+      const downLineCaptures = captures.filter(item => item?.payload?.capture_view === 'downLine');
+      const aggregateSeed = captures.reduce((memo, item) => {
+        const seed = item?.payload?.camera_review_seed || {};
+        memo.face_on_samples += Number(seed.face_on_samples || 0);
+        memo.down_line_samples += Number(seed.down_line_samples || 0);
+        return memo;
+      }, {face_on_samples: 0, down_line_samples: 0});
       const inputs = primary.derived_inputs || {};
       const findings = [];
       const nextActions = [];
 
-      if (seed.face_on_samples) {
-        findings.push(`Face-on view captured ${seed.face_on_samples} motion samples for setup, tempo, pressure shift, and shaft load clues.`);
+      if (faceCaptures.length >= 3 && aggregateSeed.face_on_samples) {
+        findings.push(`Face-on set captured ${faceCaptures.length} swings and ${aggregateSeed.face_on_samples} motion samples for setup, tempo, pressure shift, and shaft load clues.`);
       } else {
-        findings.push('Face-on view is missing; setup/load/tempo review is limited.');
-        nextActions.push('Capture a face-on view before locking shaft load or tempo conclusions.');
+        findings.push(`Face-on set has ${faceCaptures.length}/3 swings; setup/load/tempo review is limited.`);
+        nextActions.push('Capture three face-on swings before locking shaft load or tempo conclusions.');
       }
 
-      if (seed.down_line_samples) {
-        findings.push(`Down-line view captured ${seed.down_line_samples} motion samples for plane, path, hand path, and delivery clues.`);
+      if (downLineCaptures.length >= 3 && aggregateSeed.down_line_samples) {
+        findings.push(`Down-line set captured ${downLineCaptures.length} swings and ${aggregateSeed.down_line_samples} motion samples for plane, path, hand path, and delivery clues.`);
       } else {
-        findings.push('Down-line view is missing; path/plane/delivery review is limited.');
-        nextActions.push('Capture a down-line view before blaming shaft profile for path or face delivery.');
+        findings.push(`Down-line set has ${downLineCaptures.length}/3 swings; path/plane/delivery review is limited.`);
+        nextActions.push('Capture three down-the-line swings before blaming shaft profile for path or face delivery.');
       }
 
       if (inputs.transition === 'Hard') {
@@ -5492,7 +5552,7 @@ def home() -> str:
       }
 
       return {
-        verdict: `${captures.length} captured swing${captures.length === 1 ? '' : 's'} reviewed; ${seed.down_line_samples && seed.face_on_samples ? 'two-view review ready' : 'review limited by missing camera angle'}.`,
+        verdict: `${captures.length}/6 captured swings reviewed; ${faceCaptures.length >= 3 && downLineCaptures.length >= 3 ? 'full phone fitting set ready' : 'review limited until both view sets have three swings'}.`,
         findings,
         next_actions: nextActions,
         boundary: 'AI review is a fitting direction read; validate with actual video, impact marks, launch data, and player feedback.'
@@ -5518,14 +5578,9 @@ def home() -> str:
       try {
         const devices = navigator.mediaDevices.enumerateDevices ? await navigator.mediaDevices.enumerateDevices() : [];
         const videoInputs = devices.filter(device => device.kind === 'videoinput');
-        const faceConstraints = videoInputs[0]?.deviceId ? {deviceId: {exact: videoInputs[0].deviceId}} : {facingMode: 'user'};
-        const downLineConstraints = videoInputs[1]?.deviceId ? {deviceId: {exact: videoInputs[1].deviceId}} : {facingMode: 'environment'};
+        const faceConstraints = videoInputs[0]?.deviceId ? {deviceId: {exact: videoInputs[0].deviceId}} : {facingMode: 'environment'};
         cameraStreams.face = await navigator.mediaDevices.getUserMedia({ video: faceConstraints, audio: false });
-        try {
-          cameraStreams.downLine = await navigator.mediaDevices.getUserMedia({ video: downLineConstraints, audio: false });
-        } catch (secondError) {
-          cameraStreams.downLine = null;
-        }
+        cameraStreams.downLine = null;
         cameraStream = cameraStreams.face;
         const faceVideo = document.getElementById('cameraVideoFace');
         const downLineVideo = document.getElementById('cameraVideoDownLine');
@@ -5533,12 +5588,12 @@ def home() -> str:
           faceVideo.srcObject = cameraStreams.face;
           await faceVideo.play();
         }
-        if (downLineVideo && cameraStreams.downLine) {
-          downLineVideo.srcObject = cameraStreams.downLine;
+        if (downLineVideo && cameraStreams.face) {
+          downLineVideo.srcObject = cameraStreams.face;
           await downLineVideo.play();
         }
-        updateCameraHud(cameraStreams.downLine ? '2 cameras' : '1 camera', 'Ready');
-        setCameraState(cameraStreams.downLine ? 'Face-on and down-line cameras live. Capture a swing when ready.' : 'Face-on camera live. Down-line camera unavailable; capture still works with limited review.');
+        updateCameraHud('phone camera', `Ready: ${captureViewLabel(nextPhoneCaptureView())}`);
+        setCameraState('Phone camera live. Capture 3 face-on swings, then move the phone down the line for 3 more.');
       } catch (error) {
         updateCameraHud('Blocked', 'Manual mode');
         setCameraState(`Camera blocked: ${error.message || String(error)}. Manual swing mode is ready.`, true);
@@ -5584,8 +5639,8 @@ def home() -> str:
     }
 
     function sampleCameraMotion() {
-      const faceMotion = sampleSingleCameraMotion('face', 'cameraVideoFace', 'cameraSampleCanvasFace', 'cameraMotionMeterFace');
-      const downLineMotion = sampleSingleCameraMotion('downLine', 'cameraVideoDownLine', 'cameraSampleCanvasDownLine', 'cameraMotionMeterDownLine');
+      const faceMotion = cameraActiveView === 'face' ? sampleSingleCameraMotion('face', 'cameraVideoFace', 'cameraSampleCanvasFace', 'cameraMotionMeterFace') : null;
+      const downLineMotion = cameraActiveView === 'downLine' ? sampleSingleCameraMotion('downLine', 'cameraVideoDownLine', 'cameraSampleCanvasDownLine', 'cameraMotionMeterDownLine') : null;
       const motions = [faceMotion, downLineMotion].filter(value => value != null);
       if (motions.length) {
         const combinedMotion = Math.max(...motions);
@@ -5597,20 +5652,22 @@ def home() -> str:
     function startCameraSwingCapture(button) {
       flashButton(button, 'Capturing');
       const hasLiveCamera = Boolean(cameraStreams.face || cameraStreams.downLine);
+      cameraActiveView = nextPhoneCaptureView();
       cameraMotionSamples = [];
       cameraMotionSamplesByView = {face: [], downLine: []};
       cameraPreviousBrightness = null;
       cameraPreviousBrightnessByView = {face: null, downLine: null};
-      updateCameraHud(hasLiveCamera ? (cameraStreams.downLine ? '2 cameras' : '1 camera') : 'Manual', 'Capturing');
-      setCameraState('Capturing swing window.');
+      updateCameraHud(hasLiveCamera ? 'phone camera' : 'Manual', `Capturing ${captureViewLabel(cameraActiveView)}`);
+      setCameraState(`Capturing ${captureViewLabel(cameraActiveView)} swing window.`);
       if (cameraSampleTimer) window.clearInterval(cameraSampleTimer);
       cameraSampleTimer = window.setInterval(sampleCameraMotion, 180);
       window.setTimeout(() => {
         if (cameraSampleTimer) window.clearInterval(cameraSampleTimer);
         cameraSampleTimer = null;
         const profile = buildSwingFitFromPayload(hasLiveCamera ? deriveCameraPayloadFromSamples() : cameraManualPayload('manual-no-camera', 50, 65));
-        updateCameraHud(hasLiveCamera ? (cameraStreams.downLine ? '2 cameras' : '1 camera') : 'Manual', 'Analyzed');
-        setCameraState(`Swing analyzed: ${profile.fit_target.target_cpm.toFixed(1)} CPM target generated.`);
+        updateCameraHud(hasLiveCamera ? 'phone camera' : 'Manual', `Analyzed ${captureViewLabel(cameraActiveView)}`);
+        const nextView = cameraCaptures.length >= 6 ? 'ready for AI review' : `next: ${captureViewLabel(nextPhoneCaptureView())}`;
+        setCameraState(`${captureViewLabel(cameraActiveView)} swing analyzed: ${profile.fit_target.target_cpm.toFixed(1)} CPM target generated; ${nextView}.`);
       }, 5400);
     }
 
