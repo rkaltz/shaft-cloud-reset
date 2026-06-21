@@ -8633,18 +8633,12 @@ method = "${document.getElementById('method').value}"`
       const canvas = document.getElementById('cad3dCanvas');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
-      const architecture = selectedArchitecture();
       const dark = document.getElementById('cadDarkMode')?.checked;
-      const showAxis = document.getElementById('cadShowAxis')?.checked;
       const showGrid = document.getElementById('cadShowGrid')?.checked;
-      const smooth = document.getElementById('cadSmooth')?.checked;
-      const zoomFit = document.getElementById('cadZoomFit')?.checked;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = dark ? '#101918' : '#f7f8fb';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      const originX = canvas.width / 2;
-      const originY = canvas.height / 2 + 70;
       if (showGrid) {
         const gridStep = Math.max(4, cadDraftSnapStep());
         const majorEvery = 5;
@@ -8667,76 +8661,6 @@ method = "${document.getElementById('method').value}"`
           ctx.stroke();
         }
       }
-
-      if (showAxis) {
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#d92929';
-        ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX + 140, originY + 70); ctx.stroke();
-        ctx.strokeStyle = '#16a34a';
-        ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX + 110, originY - 84); ctx.stroke();
-        ctx.strokeStyle = '#304ffe';
-        ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX, originY - 150); ctx.stroke();
-      }
-
-      const shaftX = originX - 230;
-      const shaftY = originY - 20;
-      const length = 460;
-      const butt = 48;
-      const tip = 22;
-      ctx.beginPath();
-      ctx.moveTo(shaftX, shaftY - butt / 2);
-      ctx.lineTo(shaftX + length, shaftY - tip / 2);
-      ctx.lineTo(shaftX + length + 46, shaftY + 13);
-      ctx.lineTo(shaftX + 46, shaftY + butt / 2 + 13);
-      ctx.closePath();
-      ctx.fillStyle = '#35c7b2';
-      ctx.globalAlpha = smooth ? 0.9 : 0.72;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = dark ? '#d7fff6' : '#12665d';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = dark ? '#ffffff' : '#17211f';
-      ctx.font = '14px Arial';
-      ctx.fillText(`Tapered shaft / mandrel preview - ${architecture.name}`, shaftX, shaftY - 52);
-      ctx.fillText('Butt OD 15 mm', shaftX - 12, shaftY + 62);
-      ctx.fillText('Tip OD 7 mm', shaftX + length - 8, shaftY + 48);
-
-      drawArchitectureOverlay(ctx, architecture.key, shaftX, shaftY, length, butt, tip, dark);
-
-      ctx.fillStyle = '#d7d7d7';
-      ctx.strokeStyle = '#a9a9a9';
-      ctx.lineWidth = 1;
-      const cubeX = canvas.width - 128;
-      const cubeY = 48;
-      ctx.beginPath();
-      ctx.moveTo(cubeX, cubeY);
-      ctx.lineTo(cubeX + 54, cubeY + 26);
-      ctx.lineTo(cubeX + 54, cubeY + 84);
-      ctx.lineTo(cubeX, cubeY + 58);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#ededed';
-      ctx.beginPath();
-      ctx.moveTo(cubeX, cubeY);
-      ctx.lineTo(cubeX + 48, cubeY - 26);
-      ctx.lineTo(cubeX + 102, cubeY);
-      ctx.lineTo(cubeX + 54, cubeY + 26);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#cfcfcf';
-      ctx.beginPath();
-      ctx.moveTo(cubeX + 54, cubeY + 26);
-      ctx.lineTo(cubeX + 102, cubeY);
-      ctx.lineTo(cubeX + 102, cubeY + 58);
-      ctx.lineTo(cubeX + 54, cubeY + 84);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#555';
-      ctx.fillText('TOP', cubeX + 43, cubeY - 2);
-      ctx.fillText('FRONT', cubeX + 8, cubeY + 48);
-      ctx.fillText('RIGHT', cubeX + 62, cubeY + 48);
-      drawCadDraftLayer(ctx);
 
       const script = document.getElementById('cadScript');
       if (script) script.value = shaftCadScript();
