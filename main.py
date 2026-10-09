@@ -2437,16 +2437,33 @@ def home() -> str:
           <div class="shaft-data-card">
             <h3>Shaft Identity</h3>
             <div class="mini-grid">
+              <div><label>Specimen ID</label><input id="shaftDataSpecimenId" type="text" value="" placeholder="Unknown"></div>
+              <div><label>Revision</label><input id="shaftDataRevision" type="text" value="" placeholder="Unknown"></div>
               <div><label>Manufacturer</label><input id="shaftDataMaker" type="text" value=""></div>
               <div><label>Model</label><input id="shaftDataModel" type="text" value=""></div>
               <div><label>Flex Label</label><input id="shaftDataFlex" type="text" value=""></div>
-              <div><label>Raw Length (in)</label><input id="shaftDataRawLength" type="number" value="46" step="0.25"></div>
-              <div><label>Weight (g)</label><input id="shaftDataWeight" type="number" value="65" step="0.1"></div>
-              <div><label>Torque (deg)</label><input id="shaftDataTorque" type="number" value="3.5" step="0.1"></div>
-              <div><label>Tip OD (in)</label><input id="shaftDataTipOd" type="number" value="0.335" step="0.001"></div>
-              <div><label>Butt OD (in)</label><input id="shaftDataButtOd" type="number" value="0.600" step="0.001"></div>
-              <div><label>Balance Point (in)</label><input id="shaftDataBalance" type="number" value="0" step="0.1"></div>
-              <div><label>Trim State</label><select id="shaftDataTrimState"><option selected>raw uncut</option><option>butt trimmed</option><option>tip trimmed</option><option>installed pull</option></select></div>
+              <div><label>Raw Length (in)</label><input id="shaftDataRawLength" type="number" value="" step="0.25" placeholder="Unknown"></div>
+              <div><label>Weight (g)</label><input id="shaftDataWeight" type="number" value="" step="0.1" placeholder="Unknown"></div>
+              <div><label>Torque (deg)</label><input id="shaftDataTorque" type="number" value="" step="0.1" placeholder="Unknown"></div>
+              <div><label>Tip OD (in)</label><input id="shaftDataTipOd" type="number" value="" step="0.001" placeholder="Unknown"></div>
+              <div><label>Butt OD (in)</label><input id="shaftDataButtOd" type="number" value="" step="0.001" placeholder="Unknown"></div>
+              <div><label>Balance Point (in)</label><input id="shaftDataBalance" type="number" value="" step="0.1" placeholder="Unknown"></div>
+              <div><label>Trim State</label><select id="shaftDataTrimState"><option selected value="">Unknown</option><option>raw uncut</option><option>butt trimmed</option><option>tip trimmed</option><option>installed pull</option></select></div>
+            </div>
+            <h3>Measurement Conditions</h3>
+            <div class="mini-grid">
+              <div><label>Apparatus</label><input id="shaftDataApparatus" type="text" value="" placeholder="Unknown"></div>
+              <div><label>Method</label><input id="shaftDataMethod" type="text" value="" placeholder="Unknown"></div>
+              <div><label>Station Datum</label><input id="shaftDataStationDatum" type="text" value="" placeholder="Unknown"></div>
+              <div><label>Orientation</label><input id="shaftDataOrientation" type="text" value="" placeholder="Unknown"></div>
+              <div><label>Clamp Length (in)</label><input id="shaftDataClampLength" type="number" value="" step="0.01" placeholder="Unknown"></div>
+              <div><label>Applied Force (lb)</label><input id="shaftDataAppliedForce" type="number" value="" step="0.1" placeholder="Unknown"></div>
+              <div><label>Test Mass (g)</label><input id="shaftDataTestMass" type="number" value="" step="0.1" placeholder="Unknown"></div>
+              <div><label>Loading Configuration</label><input id="shaftDataLoadingConfig" type="text" value="" placeholder="Unknown"></div>
+              <div><label>Operator</label><input id="shaftDataOperator" type="text" value="" placeholder="Unknown"></div>
+              <div><label>Uncertainty (+/- CPM)</label><input id="shaftDataUncertainty" type="number" value="" min="0" step="0.1" placeholder="Unknown"></div>
+              <div><label>Evidence Source</label><input id="shaftDataSource" type="text" value="" placeholder="Unknown"></div>
+              <div><label>Calibration Status</label><select id="shaftDataCalibrationStatus"><option selected value="unknown">Unknown</option><option value="current">Current</option><option value="expired">Expired</option><option value="not_calibrated">Not calibrated</option></select></div>
             </div>
             <label>Profile Notes</label>
             <textarea id="shaftDataNotes" rows="5" style="width:100%; box-sizing:border-box; margin-top:5px; border:1px solid #b9c8c4; border-radius:6px; padding:10px;"></textarea>
@@ -2465,7 +2482,7 @@ def home() -> str:
               </div>
               <div>
                 <label for="auditorCaptureInput">CPM Reading</label>
-                <input id="auditorCaptureInput" type="number" min="0" max="999" step="0.1" inputmode="decimal" placeholder="Enter CPM">
+                <input id="auditorCaptureInput" type="number" min="0" max="999" step="1" inputmode="numeric" placeholder="Whole CPM">
               </div>
               <button id="auditorCaptureBtn">Capture + Next</button>
             </div>
@@ -2477,18 +2494,18 @@ def home() -> str:
             </div>
             <div class="auditor-butt-field">
               <label for="shaftButtFrequency">Standalone Butt Frequency</label>
-              <input id="shaftButtFrequency" data-capture-key="butt" type="number" min="0" max="999" step="0.1" value="" placeholder="Captured before station profile">
+              <input id="shaftButtFrequency" data-capture-key="butt" type="number" min="0" max="999" step="1" value="" placeholder="Whole CPM before station profile">
             </div>
             <table class="auditor-table">
               <thead><tr><th>Station</th><th>Measured CPM</th><th>Section Read</th><th>Range Rule</th></tr></thead>
               <tbody id="shaftDataRows">
-                <tr><td>41"</td><td><input id="shaftCpm41" data-station="41" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead41">-</td><td>Butt: 1 flex ~= 10 CPM</td></tr>
-                <tr><td>36"</td><td><input id="shaftCpm36" data-station="36" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead36">-</td><td>Butt: 1 flex ~= 10 CPM</td></tr>
-                <tr><td>31"</td><td><input id="shaftCpm31" data-station="31" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead31">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
-                <tr><td>26"</td><td><input id="shaftCpm26" data-station="26" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead26">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
-                <tr><td>21"</td><td><input id="shaftCpm21" data-station="21" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead21">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
-                <tr><td>16"</td><td><input id="shaftCpm16" data-station="16" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead16">-</td><td>Tip: 1 flex ~= 40+ CPM</td></tr>
-                <tr><td>11"</td><td><input id="shaftCpm11" data-station="11" type="number" min="0" max="999" step="0.1" value=""></td><td id="shaftRead11">-</td><td>Tip: 1 flex ~= 40+ CPM; Auditor display capped at 999</td></tr>
+                <tr><td>41"</td><td><input id="shaftCpm41" data-station="41" type="number" min="0" max="999" step="1" value=""></td><td id="shaftRead41">-</td><td>Butt: 1 flex ~= 10 CPM</td></tr>
+                <tr><td>36"</td><td><input id="shaftCpm36" data-station="36" type="number" min="0" max="999" step="1" value=""></td><td id="shaftRead36">-</td><td>Butt: 1 flex ~= 10 CPM</td></tr>
+                <tr><td>31"</td><td><input id="shaftCpm31" data-station="31" type="number" min="0" max="999" step="1" value=""></td><td id="shaftRead31">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
+                <tr><td>26"</td><td><input id="shaftCpm26" data-station="26" type="number" min="0" max="999" step="1" value=""></td><td id="shaftRead26">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
+                <tr><td>21"</td><td><input id="shaftCpm21" data-station="21" type="number" min="0" max="999" step="1" value=""></td><td id="shaftRead21">-</td><td>Mid: 1 flex ~= 25 CPM</td></tr>
+                <tr><td>16"</td><td><input id="shaftCpm16" data-station="16" type="number" min="0" max="999" step="1" value=""></td><td id="shaftRead16">-</td><td>Tip: 1 flex ~= 40+ CPM</td></tr>
+                <tr><td>11"</td><td><input id="shaftCpm11" data-station="11" type="number" min="0" max="999" step="1" value=""></td><td id="shaftRead11">-</td><td>Tip: 1 flex ~= 40+ CPM; Auditor display capped at 999</td></tr>
               </tbody>
             </table>
             <div class="auditor-readout">
@@ -3154,6 +3171,9 @@ def home() -> str:
     let latestFitProfile = null;
     let fitCadBridge = null;
     let latestShaftDataProfile = null;
+    let shaftDataEvidenceClass = 'measured';
+    const SHAFT_PROJECT_SCHEMA_VERSION = 2;
+    const MEASUREMENT_ENVELOPE_SCHEMA = 'shaftcad.measurement-envelope.v1';
     let cameraStream = null;
     let cameraStreams = {face: null, downLine: null};
     let cameraMotionSamples = [];
@@ -3347,6 +3367,8 @@ def home() -> str:
         typeof cad3dMouseDown === 'function',
         typeof setCadDraftTool === 'function',
         typeof runButtonAudit === 'function',
+        typeof validateMeasurementEnvelope === 'function',
+        typeof measurementRoundTripCheck === 'function' && measurementRoundTripCheck(),
         Boolean(document.getElementById('cad3dCanvas')),
         Boolean(document.getElementById('fpSmokeBtn'))
       ];
@@ -4324,6 +4346,53 @@ def home() -> str:
       return Math.max(0, Math.min(999, Number(value) || 0));
     }
 
+    function nullableText(id) {
+      const value = document.getElementById(id)?.value;
+      if (value == null) return null;
+      const trimmed = String(value).trim();
+      return trimmed === '' ? null : trimmed;
+    }
+
+    function nullableNumber(id) {
+      const raw = document.getElementById(id)?.value;
+      if (raw === '' || raw == null) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    }
+
+    function measuredCpmValue(raw) {
+      if (raw === '' || raw == null) return null;
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value < 0 || value > 999) return null;
+      return value;
+    }
+
+    function shaftDataCpmValue(raw) {
+      if (raw === '' || raw == null) return null;
+      if (shaftDataEvidenceClass === 'measured') return measuredCpmValue(raw);
+      const value = Number(raw);
+      return Number.isFinite(value) ? auditorCpmReading(value) : null;
+    }
+
+    function validateMeasurementEnvelope(envelope) {
+      const errors = [];
+      if (!envelope || envelope.schema !== MEASUREMENT_ENVELOPE_SCHEMA) errors.push('Unsupported measurement envelope schema.');
+      if (!envelope?.specimen || typeof envelope.specimen !== 'object') errors.push('Specimen record is missing.');
+      if (!Array.isArray(envelope?.observations)) errors.push('Measurement observations are missing.');
+      (envelope?.observations || []).forEach((observation, index) => {
+        if (!Object.prototype.hasOwnProperty.call(observation, 'original_value')) errors.push(`Observation ${index + 1} lost its original value.`);
+        if (!observation.units) errors.push(`Observation ${index + 1} has no units.`);
+        if (!observation.evidence_class) errors.push(`Observation ${index + 1} has no evidence classification.`);
+        if (!observation.provenance || !Object.prototype.hasOwnProperty.call(observation.provenance, 'source')) {
+          errors.push(`Observation ${index + 1} has no provenance source field.`);
+        }
+        if (observation.measurement_type === 'cpm' && observation.evidence_class === 'measured') {
+          if (!Number.isInteger(observation.original_value)) errors.push(`Measured CPM observation ${index + 1} must be a whole number.`);
+        }
+      });
+      return errors;
+    }
+
     const CPM_SECTION_RANGES = {
       Butt: {stations: [41, 36], soft: [140, 155], medium: [155, 175], stiff: [175, 190], fullFlex: 10},
       Mid: {stations: [31, 26, 21], soft: [220, 250], medium: [250, 290], stiff: [290, 320], fullFlex: 25},
@@ -4370,12 +4439,14 @@ def home() -> str:
       return AUDITOR_STATIONS.map(station => {
         const rawValue = document.getElementById(`shaftCpm${station}`)?.value;
         const hasValue = rawValue !== '' && rawValue != null;
-        const cpm = hasValue ? auditorCpmReading(Number(rawValue)) : null;
+        const cpm = hasValue ? shaftDataCpmValue(rawValue) : null;
         const section = cpmSectionForStation(station);
         const reference = CPM_SECTION_RANGES[section] || {};
         return {
           station_in: station,
           cpm,
+          original_value: hasValue ? Number(rawValue) : null,
+          evidence_class: shaftDataEvidenceClass,
           section,
           cpm_class: cpm == null ? 'missing' : cpmRangeLabel(section, cpm),
           full_flex_delta_cpm: Number(reference.fullFlex || 0),
@@ -4402,7 +4473,7 @@ def home() -> str:
     function auditorButtFrequencyValue() {
       const rawValue = document.getElementById('shaftButtFrequency')?.value;
       if (rawValue === '' || rawValue == null) return null;
-      return auditorCpmReading(Number(rawValue));
+      return shaftDataCpmValue(rawValue);
     }
 
     function updateAuditorCaptureUi(focusInput = false) {
@@ -4459,8 +4530,14 @@ def home() -> str:
         updateAuditorCaptureUi(true);
         return;
       }
+      if (!Number.isInteger(value)) {
+        setAppStatus('APS measurements must be entered as whole-number CPM.', true);
+        updateAuditorCaptureUi(true);
+        return;
+      }
+      shaftDataEvidenceClass = 'measured';
       const stationInput = auditorCaptureInputForStep(step);
-      if (stationInput) stationInput.value = value.toFixed(1);
+      if (stationInput) stationInput.value = String(value);
       if (inputEl) inputEl.value = '';
       if (auditorCaptureIndex < AUDITOR_CAPTURE_STEPS.length - 1) auditorCaptureIndex += 1;
       flashButton(button, 'Captured');
@@ -4513,6 +4590,7 @@ def home() -> str:
           updateAuditorCaptureUi();
         });
         stationInput.addEventListener('change', () => {
+          shaftDataEvidenceClass = 'measured';
           analyzeShaftData();
           updateAuditorCaptureUi();
         });
@@ -4525,6 +4603,7 @@ def home() -> str:
           updateAuditorCaptureUi();
         });
         buttInput.addEventListener('change', () => {
+          shaftDataEvidenceClass = 'measured';
           analyzeShaftData();
           updateAuditorCaptureUi();
         });
@@ -4534,6 +4613,84 @@ def home() -> str:
     function avgPresent(values) {
       const present = values.filter(value => Number.isFinite(value));
       return present.length ? present.reduce((sum, value) => sum + value, 0) / present.length : null;
+    }
+
+    function measurementObservation(id, measurementType, originalValue, units, evidenceClass, stationReference, conditions) {
+      return {
+        id,
+        measurement_type: measurementType,
+        original_value: originalValue,
+        value: originalValue,
+        units,
+        evidence_class: evidenceClass,
+        station_reference: stationReference,
+        orientation: conditions.orientation,
+        method: conditions.method,
+        apparatus: conditions.apparatus,
+        uncertainty: measurementType === 'cpm' ? conditions.uncertainty_cpm : null,
+        provenance: {
+          source: conditions.source,
+          calibration_status: conditions.calibration_status,
+          operator: conditions.operator,
+          captured_at: conditions.timestamp
+        }
+      };
+    }
+
+    function buildMeasurementEnvelope(identity, buttFrequency, stations, capturedAt) {
+      const conditions = {
+        apparatus: nullableText('shaftDataApparatus'),
+        method: nullableText('shaftDataMethod'),
+        station_datum: nullableText('shaftDataStationDatum'),
+        orientation: nullableText('shaftDataOrientation'),
+        clamp_length_in: nullableNumber('shaftDataClampLength'),
+        applied_force_lb: nullableNumber('shaftDataAppliedForce'),
+        test_mass_g: nullableNumber('shaftDataTestMass'),
+        loading_configuration: nullableText('shaftDataLoadingConfig'),
+        operator: nullableText('shaftDataOperator'),
+        uncertainty_cpm: nullableNumber('shaftDataUncertainty'),
+        source: nullableText('shaftDataSource'),
+        calibration_status: document.getElementById('shaftDataCalibrationStatus')?.value || 'unknown',
+        timestamp: capturedAt
+      };
+      const observations = [];
+      if (buttFrequency != null) {
+        observations.push(measurementObservation(
+          'cpm-butt-frequency', 'cpm', buttFrequency, 'CPM', shaftDataEvidenceClass,
+          {kind: 'standalone_butt_frequency', station: null, datum: conditions.station_datum}, conditions
+        ));
+      }
+      stations.filter(row => row.cpm != null).forEach(row => {
+        observations.push(measurementObservation(
+          `cpm-station-${row.station_in}`, 'cpm', row.original_value, 'CPM', row.evidence_class,
+          {kind: 'profile_station', station: row.station_in, units: 'in', datum: conditions.station_datum}, conditions
+        ));
+      });
+      [
+        ['raw-length', 'length', identity.raw_length_in, 'in'],
+        ['shaft-weight', 'mass', identity.weight_g, 'g'],
+        ['torque', 'torque', identity.torque_deg, 'deg'],
+        ['tip-od', 'outer_diameter', identity.tip_od_in, 'in'],
+        ['butt-od', 'outer_diameter', identity.butt_od_in, 'in'],
+        ['balance-point', 'balance_point', identity.balance_point_in, 'in']
+      ].forEach(([id, type, value, units]) => {
+        if (value != null) observations.push(measurementObservation(id, type, value, units, 'reported_observation', null, conditions));
+      });
+      return {
+        schema: MEASUREMENT_ENVELOPE_SCHEMA,
+        schema_version: 1,
+        specimen: {
+          specimen_id: identity.specimen_id,
+          revision: identity.revision,
+          manufacturer: identity.manufacturer,
+          model: identity.model,
+          flex_label: identity.flex_label,
+          trim_state: identity.trim_state,
+          notes: identity.notes
+        },
+        test_conditions: conditions,
+        observations
+      };
     }
 
     function renderShaftDataProfile() {
@@ -4571,6 +4728,20 @@ def home() -> str:
     function analyzeShaftData(button) {
       flashButton(button, 'Analyzed');
       const stations = shaftDataStationRows();
+      const invalidMeasuredStations = shaftDataEvidenceClass === 'measured'
+        ? stations.filter(row => row.original_value != null && row.cpm == null)
+        : [];
+      const buttRaw = document.getElementById('shaftButtFrequency')?.value;
+      const invalidMeasuredButt = shaftDataEvidenceClass === 'measured'
+        && buttRaw !== '' && buttRaw != null && measuredCpmValue(buttRaw) == null;
+      if (invalidMeasuredButt || invalidMeasuredStations.length) {
+        const locations = [
+          ...(invalidMeasuredButt ? ['standalone butt frequency'] : []),
+          ...invalidMeasuredStations.map(row => `${row.station_in}" station`)
+        ];
+        setAppStatus(`APS measurements require whole-number CPM at ${locations.join(', ')}.`, true);
+        return null;
+      }
       const missing = stations.filter(row => row.cpm == null).map(row => `${row.station_in}"`);
       const buttAvg = avgPresent(stations.filter(row => row.section === 'Butt').map(row => row.cpm));
       const midAvg = avgPresent(stations.filter(row => row.section === 'Mid').map(row => row.cpm));
@@ -4587,7 +4758,7 @@ def home() -> str:
       if (buttAvg != null) findings.push(`Butt section average is ${buttAvg.toFixed(1)} CPM; butt flex deltas are roughly 10 CPM per full flex.`);
       if (midAvg != null) findings.push(`Mid section average is ${midAvg.toFixed(1)} CPM; mid flex deltas are roughly 25 CPM per full flex.`);
       if (tipAvg != null) findings.push(`Tip section average is ${tipAvg.toFixed(1)} CPM; tip flex deltas are roughly 40+ CPM per full flex.`);
-      if (gradient != null) findings.push(`Measured profile gradient from ${first.station_in}" to ${last.station_in}" is ${gradient.toFixed(1)} CPM.`);
+      if (gradient != null) findings.push(`${shaftDataEvidenceClass === 'measured' ? 'Measured' : 'Calculated prototype'} profile gradient from ${first.station_in}" to ${last.station_in}" is ${gradient.toFixed(1)} CPM.`);
       const capped = stations.filter(row => row.analyzer_limited);
       if (capped.length) findings.push(`Capped stations: ${capped.map(row => `${row.station_in}"`).join(', ')}. Recheck entry because the Auditor should display 0-999 only.`);
       const usable = stations.filter(row => row.cpm != null).length >= 4;
@@ -4595,28 +4766,40 @@ def home() -> str:
       else if (usable) findings.push('Partial profile is usable for direction, but not enough to lock a design.');
       else findings.push('Not enough measured data yet. Enter at least butt, mid, and tip readings.');
 
-      latestShaftDataProfile = {
-        captured_at: new Date().toISOString(),
-        source: 'Auditor frequency analyzer',
-        identity: {
+      const capturedAt = new Date().toISOString();
+      const identity = {
+          specimen_id: nullableText('shaftDataSpecimenId'),
+          revision: nullableText('shaftDataRevision'),
           manufacturer: document.getElementById('shaftDataMaker')?.value || '',
           model: document.getElementById('shaftDataModel')?.value || '',
           flex_label: document.getElementById('shaftDataFlex')?.value || '',
-          raw_length_in: shaftDataNumber('shaftDataRawLength', null),
-          weight_g: shaftDataNumber('shaftDataWeight', null),
-          torque_deg: shaftDataNumber('shaftDataTorque', null),
-          tip_od_in: shaftDataNumber('shaftDataTipOd', null),
-          butt_od_in: shaftDataNumber('shaftDataButtOd', null),
-          balance_point_in: shaftDataNumber('shaftDataBalance', null),
+          raw_length_in: nullableNumber('shaftDataRawLength'),
+          weight_g: nullableNumber('shaftDataWeight'),
+          torque_deg: nullableNumber('shaftDataTorque'),
+          tip_od_in: nullableNumber('shaftDataTipOd'),
+          butt_od_in: nullableNumber('shaftDataButtOd'),
+          balance_point_in: nullableNumber('shaftDataBalance'),
           trim_state: document.getElementById('shaftDataTrimState')?.value || '',
           notes: document.getElementById('shaftDataNotes')?.value || ''
-        },
+        };
+      const measurementEnvelope = buildMeasurementEnvelope(identity, buttFrequency, stations, capturedAt);
+      const envelopeErrors = validateMeasurementEnvelope(measurementEnvelope);
+      if (envelopeErrors.length) {
+        setAppStatus(`Measurement envelope invalid: ${envelopeErrors[0]}`, true);
+        return null;
+      }
+      latestShaftDataProfile = {
+        captured_at: capturedAt,
+        source: measurementEnvelope.test_conditions.source,
+        evidence_class: shaftDataEvidenceClass,
+        identity,
         butt_frequency_cpm: buttFrequency,
         stations,
         section_averages: {butt: buttAvg, mid: midAvg, tip: tipAvg},
         profile_gradient_cpm: gradient,
         complete: !missing.length,
-        findings
+        findings,
+        measurement_envelope: measurementEnvelope
       };
       renderShaftDataProfile();
       setAppStatus('Shaft data profile analyzed.');
@@ -4626,6 +4809,7 @@ def home() -> str:
     async function importCurrentModelToShaftData(button) {
       if (!latest) await run();
       flashButton(button, 'Imported');
+      shaftDataEvidenceClass = 'calculated_engineering_prototype';
       const profile = latest?.zone_profile || [];
       profile.forEach(zone => {
         const station = Math.round(Number(zone.station_in || 0));
@@ -4638,7 +4822,7 @@ def home() -> str:
       }
       analyzeShaftData();
       setAuditorCaptureIndexForNextMissing();
-      setAppStatus('Current simulated CPM profile imported into Shaft Data.');
+      setAppStatus('Calculated engineering-prototype CPM profile imported; it is not labeled as measured evidence.');
     }
 
     function applyShaftDataTarget(button) {
@@ -4651,7 +4835,8 @@ def home() -> str:
       flashButton(button, 'Applied');
       document.getElementById('target').value = butt.toFixed(1);
       run();
-      setAppStatus(`Target CPM set from measured butt frequency: ${butt.toFixed(1)}.`);
+      const evidenceLabel = latestShaftDataProfile?.evidence_class === 'measured' ? 'measured' : 'calculated prototype';
+      setAppStatus(`Target CPM set from ${evidenceLabel} butt frequency: ${butt.toFixed(1)}.`);
     }
 
     function fitMultiplier(value, mapping) {
@@ -7735,9 +7920,81 @@ ${y2.toFixed(3)}
       URL.revokeObjectURL(url);
     }
 
+    function setShaftDataField(id, value) {
+      const element = document.getElementById(id);
+      if (element) element.value = value == null ? '' : String(value);
+    }
+
+    function restoreMeasurementEnvelope(envelope, savedProfile = null) {
+      const errors = validateMeasurementEnvelope(envelope);
+      if (errors.length) throw new Error(errors[0]);
+      const specimen = envelope.specimen || {};
+      const conditions = envelope.test_conditions || {};
+      const observations = envelope.observations || [];
+      const observationById = id => observations.find(item => item.id === id);
+      const observationValue = id => observationById(id)?.original_value ?? null;
+      const cpmObservations = observations.filter(item => item.measurement_type === 'cpm');
+
+      setShaftDataField('shaftDataSpecimenId', specimen.specimen_id);
+      setShaftDataField('shaftDataRevision', specimen.revision);
+      setShaftDataField('shaftDataMaker', specimen.manufacturer);
+      setShaftDataField('shaftDataModel', specimen.model);
+      setShaftDataField('shaftDataFlex', specimen.flex_label);
+      setShaftDataField('shaftDataTrimState', specimen.trim_state);
+      setShaftDataField('shaftDataNotes', specimen.notes);
+      setShaftDataField('shaftDataRawLength', observationValue('raw-length'));
+      setShaftDataField('shaftDataWeight', observationValue('shaft-weight'));
+      setShaftDataField('shaftDataTorque', observationValue('torque'));
+      setShaftDataField('shaftDataTipOd', observationValue('tip-od'));
+      setShaftDataField('shaftDataButtOd', observationValue('butt-od'));
+      setShaftDataField('shaftDataBalance', observationValue('balance-point'));
+      setShaftDataField('shaftDataApparatus', conditions.apparatus);
+      setShaftDataField('shaftDataMethod', conditions.method);
+      setShaftDataField('shaftDataStationDatum', conditions.station_datum);
+      setShaftDataField('shaftDataOrientation', conditions.orientation);
+      setShaftDataField('shaftDataClampLength', conditions.clamp_length_in);
+      setShaftDataField('shaftDataAppliedForce', conditions.applied_force_lb);
+      setShaftDataField('shaftDataTestMass', conditions.test_mass_g);
+      setShaftDataField('shaftDataLoadingConfig', conditions.loading_configuration);
+      setShaftDataField('shaftDataOperator', conditions.operator);
+      setShaftDataField('shaftDataUncertainty', conditions.uncertainty_cpm);
+      setShaftDataField('shaftDataSource', conditions.source);
+      setShaftDataField('shaftDataCalibrationStatus', conditions.calibration_status || 'unknown');
+
+      const butt = observationById('cpm-butt-frequency');
+      setShaftDataField('shaftButtFrequency', butt?.original_value);
+      AUDITOR_STATIONS.forEach(station => {
+        const observation = observationById(`cpm-station-${station}`);
+        setShaftDataField(`shaftCpm${station}`, observation?.original_value);
+      });
+      shaftDataEvidenceClass = cpmObservations[0]?.evidence_class || 'measured';
+      latestShaftDataProfile = savedProfile ? deepClone(savedProfile) : {
+        captured_at: conditions.timestamp || null,
+        source: conditions.source,
+        evidence_class: shaftDataEvidenceClass,
+        identity: deepClone(specimen),
+        butt_frequency_cpm: butt?.value ?? null,
+        stations: AUDITOR_STATIONS.map(station => {
+          const observation = observationById(`cpm-station-${station}`);
+          const cpm = observation?.value ?? null;
+          const section = cpmSectionForStation(station);
+          return {station_in: station, cpm, original_value: observation?.original_value ?? null, evidence_class: observation?.evidence_class || shaftDataEvidenceClass, section, cpm_class: cpm == null ? 'missing' : cpmRangeLabel(section, cpm)};
+        }),
+        section_averages: {butt: null, mid: null, tip: null},
+        profile_gradient_cpm: null,
+        complete: false,
+        findings: ['Imported measurement envelope.'],
+        measurement_envelope: deepClone(envelope)
+      };
+      latestShaftDataProfile.measurement_envelope = deepClone(envelope);
+      renderShaftDataProfile();
+      setAuditorCaptureIndexForNextMissing();
+    }
+
     function currentProject() {
       return {
-        version: 1,
+        version: SHAFT_PROJECT_SCHEMA_VERSION,
+        schema: 'shaftcad.project.v2',
         name: 'ShaftCAD project',
         inputs: {
           target_cpm: document.getElementById('target').value,
@@ -7753,8 +8010,19 @@ ${y2.toFixed(3)}
         flags,
         tapes,
         flag_constraints: flagConstraints,
-        stack_layers: ensureStackLayers()
+        stack_layers: ensureStackLayers(),
+        shaft_data_profile: latestShaftDataProfile ? deepClone(latestShaftDataProfile) : null,
+        measurement_envelope: latestShaftDataProfile?.measurement_envelope ? deepClone(latestShaftDataProfile.measurement_envelope) : null
       };
+    }
+
+    function measurementRoundTripCheck() {
+      const project = currentProject();
+      const restored = JSON.parse(JSON.stringify(project));
+      if (project.version !== SHAFT_PROJECT_SCHEMA_VERSION || restored.schema !== 'shaftcad.project.v2') return false;
+      if (!project.measurement_envelope) return true;
+      if (validateMeasurementEnvelope(restored.measurement_envelope).length) return false;
+      return JSON.stringify(project.measurement_envelope) === JSON.stringify(restored.measurement_envelope);
     }
 
     function downloadProject(button) {
@@ -7775,6 +8043,10 @@ ${y2.toFixed(3)}
       const reader = new FileReader();
       reader.onload = () => {
         const project = JSON.parse(reader.result);
+        const projectVersion = Number(project.version || 1);
+        if (![1, SHAFT_PROJECT_SCHEMA_VERSION].includes(projectVersion)) {
+          throw new Error(`Unsupported ShaftCAD project version: ${projectVersion}`);
+        }
         if (project.inputs) {
           document.getElementById('target').value = project.inputs.target_cpm || 255;
           document.getElementById('head').value = project.inputs.head_weight_g || 205;
@@ -7812,6 +8084,8 @@ ${y2.toFixed(3)}
           stackLayers = project.stack_layers;
           renderStackCad();
         }
+        const envelope = project.measurement_envelope || project.shaft_data_profile?.measurement_envelope;
+        if (envelope) restoreMeasurementEnvelope(envelope, project.shaft_data_profile || null);
         run();
       };
       reader.readAsText(file);
