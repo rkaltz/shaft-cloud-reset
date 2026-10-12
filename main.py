@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import csv
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from math import cos, degrees, log10, pi, radians, sin, sqrt
+from math import cos, degrees, isfinite, log10, pi, radians, sin, sqrt
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -848,6 +850,128 @@ SHAFT_REFERENCE_DATABASE: list[dict[str, Any]] = [
     },
 ]
 
+BMT_STATIONS = ("41in", "36in", "31in", "26in", "21in", "16in", "11in")
+BMT_FLEX_ANCHORS = (2.5, 3.5, 4.5, 5.5, 6.5, 7.5)
+BMT_ZONE_ANCHORS = {
+    "butt": (157.0, 165.0, 173.0, 181.0, 189.0, 197.0),
+    "mid": (236.0, 251.0, 266.0, 281.0, 296.0, 311.0),
+    "tip": (551.0, 579.0, 607.0, 635.0, 663.0, 691.0),
+}
+BMT_RELEASE_OFFSETS = (-0.6, -0.3, 0.0, 0.3, 0.6, 0.9, 0.6, 0.3, 0.0, -0.3, -0.6, -0.9)
+BMT_LIBRARY_PATH = Path(__file__).resolve().parent / "data" / "bmt_shaft_profiles.csv"
+
+
+def _bmt_quality(stations: list[float]) -> tuple[str, list[str]]:
+    issues: list[str] = []
+    if len(stations) != 7 or not all(isfinite(value) and value > 0 for value in stations):
+        issues.append("missing or non-positive station CPM")
+    if any(value >= 999 for value in stations):
+        issues.append("analyzer-limited or sentinel station CPM")
+    if any(right <= left for left, right in zip(stations, stations[1:])):
+        issues.append("non-monotonic station profile")
+    if any(value > 1200 for value in stations):
+        issues.append("implausible station CPM")
+    return ("quarantined" if issues else "eligible", issues)
+
+
+def load_bmt_library() -> list[dict[str, Any]]:
+    if not BMT_LIBRARY_PATH.exists():
+        return []
+    profiles: list[dict[str, Any]] = []
+    with BMT_LIBRARY_PATH.open(newline="", encoding="utf-8-sig") as source:
+        for row in csv.DictReader(source):
+            try:
+                stations = [float(row[name]) for name in BMT_STATIONS]
+            except (TypeError, ValueError):
+                stations = []
+            status, issues = _bmt_quality(stations)
+            profiles.append({
+                **row,
+                "stations_cpm": dict(zip(BMT_STATIONS, stations)),
+                "weight_g": float(row["weight_g"]) if row.get("weight_g") else None,
+                "occurrences": int(row.get("occurrences", 1) or 1),
+                "quality_status": status,
+                "quality_issues": issues,
+            })
+    return profiles
+
+
+BMT_SHAFT_LIBRARY = load_bmt_library()
+
+
+def _bmt_flex_from_cpm(value: float, zone: str) -> float:
+    anchors = BMT_ZONE_ANCHORS[zone]
+    for index in range(len(anchors) - 1):
+        low, high = anchors[index], anchors[index + 1]
+        if value <= high:
+            return BMT_FLEX_ANCHORS[index] + (value - low) / (high - low)
+    return BMT_FLEX_ANCHORS[-1] + (value - anchors[-1]) / (anchors[-1] - anchors[-2])
+
+
+def bmt_fit_comparison(
+    speed_mph: float,
+    tempo_seconds: float,
+    release_clock: int,
+    target_weight_g: float,
+    limit: int = 10,
+) -> dict[str, Any]:
+    release_clock = max(1, min(12, int(release_clock)))
+    butt_target = speed_mph / 10.0 - 4.5
+    if tempo_seconds < 1.0:
+        mid_target = butt_target + round((1.0 - tempo_seconds) * 3.0, 1)
+    elif tempo_seconds <= 1.2:
+        mid_target = butt_target
+    else:
+        mid_target = butt_target + round((1.2 - tempo_seconds) * 3.0, 1)
+    tip_target = mid_target + BMT_RELEASE_OFFSETS[release_clock - 1]
+    targets = {"butt": butt_target, "mid": mid_target, "tip": tip_target}
+
+    ranked: list[dict[str, Any]] = []
+    for profile in BMT_SHAFT_LIBRARY:
+        if profile["quality_status"] != "eligible":
+            continue
+        values = list(profile["stations_cpm"].values())
+        zone_cpm = {
+            "butt": sum(values[0:2]) / 2.0,
+            "mid": sum(values[2:5]) / 3.0,
+            "tip": sum(values[5:7]) / 2.0,
+        }
+        zone_flex = {zone: _bmt_flex_from_cpm(value, zone) for zone, value in zone_cpm.items()}
+        points = {zone: abs(zone_flex[zone] - targets[zone]) <= (0.5 if zone_flex[zone] >= targets[zone] else 0.3) for zone in targets}
+        weight_known = profile["weight_g"] is not None
+        weight_match = weight_known and abs(profile["weight_g"] - target_weight_g) <= 5.0
+        score = sum(points.values()) + int(weight_match)
+        distance = sum(abs(zone_flex[zone] - targets[zone]) for zone in targets)
+        if weight_known:
+            distance += abs(profile["weight_g"] - target_weight_g) / 10.0
+        ranked.append({
+            "profile_id": profile["profile_id"],
+            "company": profile["company"],
+            "model": profile["model"],
+            "flex_label": profile["flex"],
+            "weight_g": profile["weight_g"],
+            "stations_cpm": profile["stations_cpm"],
+            "zone_cpm": {zone: round(value, 1) for zone, value in zone_cpm.items()},
+            "zone_flex": {zone: round(value, 2) for zone, value in zone_flex.items()},
+            "score": score,
+            "score_max": 4 if weight_known else 3,
+            "matched_points": {**points, "weight": weight_match if weight_known else None},
+            "occurrences": profile["occurrences"],
+            "sources": profile["sources"],
+            "distance": distance,
+        })
+    ranked.sort(key=lambda item: (-item["score"], item["distance"], item["company"], item["model"]))
+    quarantined = sum(profile["quality_status"] == "quarantined" for profile in BMT_SHAFT_LIBRARY)
+    return {
+        "method": "BMT legacy heuristic reproduction",
+        "validation_status": "unverified heuristic; comparison only",
+        "protocol": "7 station CPM, 5-inch clamp, silk screen at 12 o'clock, 454 g profile tip weight",
+        "inputs": {"speed_mph": speed_mph, "tempo_seconds": tempo_seconds, "release_clock": release_clock, "target_weight_g": target_weight_g},
+        "target_flex": {zone: round(value, 2) for zone, value in targets.items()},
+        "library": {"total": len(BMT_SHAFT_LIBRARY), "eligible": len(BMT_SHAFT_LIBRARY) - quarantined, "quarantined": quarantined},
+        "matches": ranked[:max(1, min(50, int(limit)))],
+    }
+
 
 def shaft_reference_matches(speed_mph: float, tempo: str, transition: str, miss: str) -> list[dict[str, Any]]:
     matches: list[dict[str, Any]] = []
@@ -1467,6 +1591,12 @@ def swing_capture_to_fit(payload: dict[str, Any]) -> dict[str, Any]:
         "Store prototype results in the shaft database before declaring the recipe proven.",
     ]
     fit["shaft_database_matches"] = shaft_reference_matches(speed_mph, tempo, transition, miss)
+    fit["bmt_legacy_comparison"] = bmt_fit_comparison(
+        speed_mph=speed_mph,
+        tempo_seconds=tempo_seconds,
+        release_clock=int(payload.get("bmt_release_clock", 6) or 6),
+        target_weight_g=float(payload.get("bmt_target_weight_g", weight_g) or weight_g),
+    )
     fit["diy_driver_tuneup"] = diy_driver_tuneup(payload)
     fit["visual_fitting"] = visual_fitting_read(payload)
     fit["launch_rollout_optimizer"] = driver_launch_rollout_optimizer(payload)
@@ -2623,6 +2753,8 @@ def home() -> str:
               <div><label>Tempo Seconds</label><input id="cameraTempoSeconds" type="number" value="1.05" step="0.01"></div>
               <div><label>Transition Load</label><input id="cameraTransitionLoad" type="number" value="55" step="1" min="0" max="100"></div>
               <div><label>Release Score</label><input id="cameraReleaseScore" type="number" value="50" step="1" min="0" max="100"></div>
+              <div><label>BMT Release Clock (1-12)</label><input id="cameraBmtReleaseClock" type="number" value="6" step="1" min="1" max="12"></div>
+              <div><label>BMT Target Weight (g)</label><input id="cameraBmtTargetWeight" type="number" value="65" step="1" min="20" max="150"></div>
               <div><label>Face Closure Rate</label><input id="cameraClosureRate" type="number" value="50" step="1" min="0" max="100"></div>
               <div><label>Attack Angle (deg)</label><input id="cameraAttackAngle" type="number" value="0" step="0.1"></div>
               <div><label>Face-to-Path (deg)</label><input id="cameraFacePath" type="number" value="0" step="0.1"></div>
@@ -2711,8 +2843,12 @@ def home() -> str:
                 <ul id="cameraWishonList"><li>No Wishon guard read yet.</li></ul>
               </div>
               <div class="camera-section-card camera-wide-card">
-                <h4>Starter Shaft Database Matches</h4>
+                <h4>ShaftCAD Reference Matches</h4>
                 <ul id="cameraDatabaseList"><li>No comparable shafts yet.</li></ul>
+              </div>
+              <div class="camera-section-card camera-wide-card">
+                <h4>BMT Legacy Comparison</h4>
+                <ul id="cameraBmtList"><li>No BMT comparison yet.</li></ul>
               </div>
             </div>
             <h3>Capture Packet</h3>
@@ -3180,6 +3316,7 @@ def home() -> str:
     let cameraMotionSamplesByView = {face: [], downLine: []};
     let cameraCaptures = [];
     let latestCameraSwingProfile = null;
+    let latestBmtComparison = null;
     let cameraSampleTimer = null;
     let cameraPreviousBrightness = null;
     let cameraPreviousBrightnessByView = {face: null, downLine: null};
@@ -4919,6 +5056,8 @@ def home() -> str:
         tempo_seconds: cameraNumber('cameraTempoSeconds', 1.05),
         transition_load: cameraNumber('cameraTransitionLoad', 55),
         release_score: cameraNumber('cameraReleaseScore', 50),
+        bmt_release_clock: cameraNumber('cameraBmtReleaseClock', 6),
+        bmt_target_weight_g: cameraNumber('cameraBmtTargetWeight', cameraNumber('cameraWeight', 65)),
         face_closure_rate: cameraNumber('cameraClosureRate', 50),
         attack_angle_deg: cameraNumber('cameraAttackAngle', 0),
         face_to_path_deg: cameraNumber('cameraFacePath', 0),
@@ -5458,7 +5597,31 @@ def home() -> str:
       };
       cameraCaptures = [latestCameraSwingProfile, ...cameraCaptures].slice(0, 5);
       renderCameraFitResult();
+      refreshBmtComparison(payload);
       return latestCameraSwingProfile;
+    }
+
+    async function refreshBmtComparison(payload) {
+      const bmtList = document.getElementById('cameraBmtList');
+      if (bmtList) bmtList.innerHTML = '<li>Comparing against the BMT library...</li>';
+      try {
+        const response = await fetch('/api/bmt/compare', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            speed_mph: payload.speed_mph,
+            tempo_seconds: payload.tempo_seconds,
+            release_clock: payload.bmt_release_clock,
+            target_weight_g: payload.bmt_target_weight_g
+          })
+        });
+        if (!response.ok) throw new Error(`BMT comparison failed (${response.status})`);
+        latestBmtComparison = await response.json();
+        if (latestCameraSwingProfile) latestCameraSwingProfile.fit_target.bmt_legacy_comparison = latestBmtComparison;
+      } catch (error) {
+        latestBmtComparison = {error: error.message || String(error)};
+      }
+      renderCameraFitResult();
     }
 
     function renderCameraFitResult() {
@@ -5478,6 +5641,7 @@ def home() -> str:
       const sensationList = document.getElementById('cameraSensationList');
       const wishonList = document.getElementById('cameraWishonList');
       const databaseList = document.getElementById('cameraDatabaseList');
+      const bmtList = document.getElementById('cameraBmtList');
       if (!latestCameraSwingProfile) {
         if (result) result.innerHTML = '<tr><td colspan="2">No swing analyzed yet.</td></tr>';
         if (packet) packet.textContent = 'No swing packet yet.';
@@ -5493,6 +5657,7 @@ def home() -> str:
         if (sensationList) sensationList.innerHTML = '<li>No sensation/quality read yet.</li>';
         if (wishonList) wishonList.innerHTML = '<li>No Wishon guard read yet.</li>';
         if (databaseList) databaseList.innerHTML = '<li>No comparable shafts yet.</li>';
+        if (bmtList) bmtList.innerHTML = '<li>No BMT comparison yet.</li>';
       } else {
         const fit = latestCameraSwingProfile.fit_target;
         const inputs = latestCameraSwingProfile.derived_inputs;
@@ -5607,6 +5772,19 @@ def home() -> str:
         }
         if (databaseList) {
           databaseList.innerHTML = (fit.shaft_database_matches || []).map(item => `<li><strong>${escapeFitText(item.name)}</strong>: ${escapeFitText(item.profile)} (${item.match_score}/8 match)</li>`).join('') || '<li>No comparable shafts yet.</li>';
+        }
+        if (bmtList) {
+          const comparison = fit.bmt_legacy_comparison || latestBmtComparison || {};
+          if (comparison.error) {
+            bmtList.innerHTML = `<li>${escapeFitText(comparison.error)}</li>`;
+          } else {
+            const target = comparison.target_flex || {};
+            const library = comparison.library || {};
+            const summary = `<li><strong>Legacy target</strong>: butt ${Number(target.butt || 0).toFixed(2)}, mid ${Number(target.mid || 0).toFixed(2)}, tip ${Number(target.tip || 0).toFixed(2)} flex. ${Number(library.eligible || 0)} eligible / ${Number(library.quarantined || 0)} quarantined.</li>`;
+            const matches = (comparison.matches || []).map(item => `<li><strong>${escapeFitText(item.company + ' ' + item.model + ' ' + item.flex_label)}</strong>: ${item.score}/${item.score_max} BMT points, ${item.weight_g == null ? 'weight unknown' : Number(item.weight_g).toFixed(1) + ' g'} (${escapeFitText(item.profile_id)})</li>`).join('');
+            const boundary = '<li><em>Unverified BMT heuristic for side-by-side comparison; not a validated recommendation.</em></li>';
+            bmtList.innerHTML = summary + matches + boundary;
+          }
         }
         if (packet) packet.textContent = JSON.stringify(latestCameraSwingProfile, null, 2);
       }
@@ -9562,6 +9740,29 @@ def api_fit_target(
 @app.post("/api/swing-to-shaft")
 def api_swing_to_shaft(payload: dict[str, Any]) -> dict[str, Any]:
     return swing_capture_to_fit(payload)
+
+
+@app.get("/api/bmt/library")
+def api_bmt_library() -> dict[str, Any]:
+    quarantined = sum(profile["quality_status"] == "quarantined" for profile in BMT_SHAFT_LIBRARY)
+    return {
+        "source": "BMT/JerryClubDoc recovered workbook export",
+        "total": len(BMT_SHAFT_LIBRARY),
+        "eligible": len(BMT_SHAFT_LIBRARY) - quarantined,
+        "quarantined": quarantined,
+        "validation_status": "historical measurement library; provenance retained; fitting heuristic unverified",
+    }
+
+
+@app.post("/api/bmt/compare")
+def api_bmt_compare(payload: dict[str, Any]) -> dict[str, Any]:
+    return bmt_fit_comparison(
+        speed_mph=float(payload.get("speed_mph", 105.0) or 105.0),
+        tempo_seconds=float(payload.get("tempo_seconds", 1.05) or 1.05),
+        release_clock=int(payload.get("release_clock", 6) or 6),
+        target_weight_g=float(payload.get("target_weight_g", 65.0) or 65.0),
+        limit=int(payload.get("limit", 10) or 10),
+    )
 
 
 @app.post("/api/diy-driver-tuneup")
